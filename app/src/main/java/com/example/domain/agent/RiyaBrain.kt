@@ -105,12 +105,18 @@ constructor(
       val rag = health?.ragStatus
       _latestRagStatus.value = rag
 
+      // 5. Instant (<50ms) fast-path for direct single-step phone control & analysis
+      val fastReply = tryFastLocalCommand(trimmed, health, rag)
+      if (fastReply != null) {
+        val mood = if (rag?.shouldShowRag == true) "playful_rag" else "loving"
+        memoryRepository.addMessage(role = "riya", text = fastReply, mood = mood)
+        return@withContext RiyaReply(text = fastReply, mood = mood, ragStatus = rag)
+      }
+
       val apiKey = secretRepository.getStoredApiKey()
       if (apiKey.isNullOrBlank()) {
-        val offlineFallback = tryOfflineFallback(trimmed, health?.let { phoneAnalyzer.formatSummaryForPrompt(it) })
         val reply =
-          offlineFallback
-            ?: "Jaan, amar Gemini API key ekhono dewa hoyni. Settings -> API Key screen-e giye key ta dao, tahole ami tomar sathe mon khule kotha bolte parbo!"
+          "Jaan, amar Gemini API key ekhono dewa hoyni. Settings -> API Key screen-e giye key ta dao, tahole ami tomar sathe mon khule kotha bolte parbo!"
         memoryRepository.addMessage(role = "riya", text = reply, mood = "caring")
         return@withContext RiyaReply(reply, mood = "caring", ragStatus = rag)
       }
@@ -170,10 +176,8 @@ constructor(
         RiyaReply(text = replyText, mood = mood, ragStatus = rag)
       } catch (e: Exception) {
         Timber.e(e, "GeminiBrain error")
-        val offlineFallback = tryOfflineFallback(trimmed, health?.let { phoneAnalyzer.formatSummaryForPrompt(it) })
         val fallbackMsg =
-          offlineFallback
-            ?: "Shona, ektu network/API problem hocche (${e.localizedMessage ?: "error"}). Tobe ami pashei achi!"
+          "Shona, ektu network/API problem hocche (${e.localizedMessage ?: "error"}). Tobe ami pashei achi!"
         memoryRepository.addMessage(role = "riya", text = fallbackMsg, mood = "caring")
         RiyaReply(text = fallbackMsg, mood = "caring", ragStatus = rag)
       } finally {
@@ -188,6 +192,12 @@ constructor(
   ): String {
     val tools = GeminiToolDeclarations.buildToolsJsonArray()
     repeat(6) {
+      val generationConfig =
+        JSONObject()
+          .put("temperature", 0.72)
+          .put("maxOutputTokens", 300)
+          .put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
+
       val payload =
         JSONObject()
           .put(
@@ -196,12 +206,7 @@ constructor(
           )
           .put("contents", contents)
           .put("tools", tools)
-          .put(
-            "generationConfig",
-            JSONObject()
-              .put("temperature", 0.75)
-              .put("maxOutputTokens", 512),
-          )
+          .put("generationConfig", generationConfig)
 
       val responseJson = executeGenerateContentWithModelFallback(apiKey, payload)
 
@@ -301,11 +306,14 @@ constructor(
       val model = queue.removeFirst()
       if (!tried.add(model)) continue
 
+      val requestPayload =
+        if (tried.size == 0) payload else payload
+
       val request =
         Request.Builder()
           .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
           .header("x-goog-api-key", apiKey)
-          .post(payload.toString().toRequestBody("application/json".toMediaType()))
+          .post(requestPayload.toString().toRequestBody("application/json".toMediaType()))
           .build()
 
       okHttpClient.newCall(request).execute().use { resp ->
@@ -316,6 +324,17 @@ constructor(
         }
         val cleanMsg = extractGeminiErrorMessage(body) ?: "HTTP ${resp.code}"
         lastError = "HTTP ${resp.code}: $cleanMsg"
+
+        // If a model doesn't accept thinkingConfig, strip it once and retry the same model
+        if (resp.code == 400 && body.contains("thinkingConfig", ignoreCase = true)) {
+          val gen = payload.optJSONObject("generationConfig")
+          if (gen != null && gen.has("thinkingConfig")) {
+            gen.remove("thinkingConfig")
+            tried.remove(model)
+            queue.addFirst(model)
+            continue
+          }
+        }
 
         if (resp.code == 404) {
           val suggested = extractSuggestedModel(body)
@@ -330,25 +349,151 @@ constructor(
     throw IllegalStateException(lastError ?: "No compatible Gemini model available")
   }
 
-  private suspend fun tryOfflineFallback(input: String, phoneSummary: String?): String? {
-    val lower = input.lowercase()
-    return when {
-      lower.contains("flashlight on") || lower.contains("torch on") -> {
-        toolExecutor.executeTool("toggle_setting", JSONObject().put("setting", "flashlight_on")).message
-      }
-      lower.contains("flashlight off") || lower.contains("torch off") -> {
-        toolExecutor.executeTool("toggle_setting", JSONObject().put("setting", "flashlight_off")).message
-      }
-      lower.contains("analyse") || lower.contains("analyze") || lower.contains("phone status") -> {
-        phoneSummary ?: toolExecutor.executeTool("get_phone_status", JSONObject()).message
-      }
-      lower.startsWith("open ") -> {
-        val app = lower.removePrefix("open ").trim()
-        val res = toolExecutor.executeTool("open_app", JSONObject().put("app_name", app))
-        if (res.ok) "Hoye gese jaan! ${res.message}" else res.message
-      }
-      else -> null
+  private suspend fun tryFastLocalCommand(
+    input: String,
+    health: com.example.analysis.PhoneHealthReport?,
+    rag: RagStatus?,
+  ): String? {
+    val lower = input.trim().lowercase()
+    // Let multi-step commands go to Gemini tool loop
+    val looksMultiStep =
+      listOf(" then ", " tarpor ", " kore ", " pore ", " ar volume", " & ").any { lower.contains(it) }
+    if (looksMultiStep) return null
+
+    // 1. Flashlight
+    if (Regex("""\b(flashlight|torch|light)\b.*\b(on|jalao|jalo|start)\b""").containsMatchIn(lower) ||
+      lower == "flashlight on" || lower == "torch on" ||
+      (lower.contains("ফ্ল্যাশলাইট") && (lower.contains("অন") || lower.contains("জ্বালাও") || lower.contains("চালু")))
+    ) {
+      val res = toolExecutor.executeTool("toggle_setting", JSONObject().put("setting", "flashlight_on"))
+      return if (res.ok) "Hoye gese jaan! Flashlight on kore diyechi." else res.message
     }
+    if (Regex("""\b(flashlight|torch|light)\b.*\b(off|bondho|stop|bujhao)\b""").containsMatchIn(lower) ||
+      lower == "flashlight off" || lower == "torch off" ||
+      (lower.contains("ফ্ল্যাশলাইট") && (lower.contains("অফ") || lower.contains("বন্ধ")))
+    ) {
+      val res = toolExecutor.executeTool("toggle_setting", JSONObject().put("setting", "flashlight_off"))
+      return if (res.ok) "Flashlight off kore dilam shona." else res.message
+    }
+
+    // 2. YouTube search & play
+    val ytRegexes =
+      listOf(
+        Regex("""^(?:hey\s+)?(?:youtube|yt|ইউটিউব|ইউটিউবে)\s*(?:e|te|me|pe|on|in|এ|তে)?\s+(.+?)\s+(?:play|chalao|chala|bajao|baja|search|প্লে|চালাও|চালা|বাজাও|বাজা|সার্চ)(?:\s+(?:koro|karo|kro|করো|কর|দাও))?$"""),
+        Regex("""^play\s+(.+?)\s+on\s+youtube$"""),
+      )
+    for (rx in ytRegexes) {
+      val match = rx.find(lower)
+      val songQuery = match?.groupValues?.getOrNull(1)?.trim().orEmpty()
+      if (songQuery.isNotEmpty() && !songQuery.contains("kore")) {
+        val res = toolExecutor.executeTool("play_youtube", JSONObject().put("query", songQuery))
+        return if (res.ok) "Hoye gese jaan! YouTube-e \"$songQuery\" chaliye dichi." else res.message
+      }
+    }
+
+    // 3. Volume & Media
+    when {
+      lower in listOf("volume up", "volume barao", "awaj barao", "sound barao", "ভলিউম বাড়াও", "আওয়াজ বাড়াও") -> {
+        val res = toolExecutor.executeTool("media_control", JSONObject().put("action", "volume_up"))
+        return if (res.ok) "Volume bariye dilam jaan!" else res.message
+      }
+      lower in listOf("volume down", "volume komao", "awaj komao", "sound komao", "ভলিউম কমাও", "আওয়াজ কমাও") -> {
+        val res = toolExecutor.executeTool("media_control", JSONObject().put("action", "volume_down"))
+        return if (res.ok) "Volume komiye dilam shona!" else res.message
+      }
+      lower in listOf("mute", "mute koro", "awaj bondho", "মিউট করো") -> {
+        val res = toolExecutor.executeTool("media_control", JSONObject().put("action", "mute"))
+        return if (res.ok) "Sound mute kore diyechi." else res.message
+      }
+      lower in listOf("unmute", "unmute koro") -> {
+        val res = toolExecutor.executeTool("media_control", JSONObject().put("action", "unmute"))
+        return if (res.ok) "Sound unmute kore diyechi." else res.message
+      }
+      lower in listOf("pause", "pause koro", "gan thamao", "gaan thamao", "video thamao", "পজ করো", "থামাও") -> {
+        val res = toolExecutor.executeTool("media_control", JSONObject().put("action", "pause"))
+        return if (res.ok) "Pause kore dilam jaan." else res.message
+      }
+      lower in listOf("resume", "play koro", "gan chalao", "চালু করো") -> {
+        val res = toolExecutor.executeTool("media_control", JSONObject().put("action", "play"))
+        return if (res.ok) "Abar play kore dilam!" else res.message
+      }
+      lower in listOf("next", "next song", "porer gaan", "next video", "পরের গান") -> {
+        val res = toolExecutor.executeTool("media_control", JSONObject().put("action", "next"))
+        return if (res.ok) "Porer gaan-e gelam shona!" else res.message
+      }
+      lower in listOf("previous", "previous song", "ager gaan", "আগের গান") -> {
+        val res = toolExecutor.executeTool("media_control", JSONObject().put("action", "previous"))
+        return if (res.ok) "Ager gaan-e phire gelam!" else res.message
+      }
+    }
+
+    // 4. Global Accessibility actions & Scrolling
+    when {
+      lower in listOf("back", "go back", "back jao", "pichone jao", "ব্যাক যাও", "পিছনে যাও") -> {
+        val res = toolExecutor.executeTool("press_global", JSONObject().put("action", "back"))
+        return if (res.ok) "Back gelam jaan." else res.message
+      }
+      lower in listOf("home", "go home", "home jao", "home screen", "হোম যাও") -> {
+        val res = toolExecutor.executeTool("press_global", JSONObject().put("action", "home"))
+        return if (res.ok) "Home screen-e chole elam." else res.message
+      }
+      lower in listOf("screenshot", "take screenshot", "screenshot nao", "screenshot tulo", "স্ক্রিনশট নাও") -> {
+        val res = toolExecutor.executeTool("take_screenshot", JSONObject())
+        return if (res.ok) "Screenshot tule niyechi shona!" else res.message
+      }
+      lower in listOf("scroll down", "niche scroll", "niche scroll koro", "niche namo", "নিচে স্ক্রল করো") -> {
+        val res = toolExecutor.executeTool("scroll", JSONObject().put("direction", "down"))
+        return if (res.ok) "Niche scroll korlam!" else res.message
+      }
+      lower in listOf("scroll up", "upore scroll", "upore scroll koro", "upore otho", "উপরে স্ক্রল করো") -> {
+        val res = toolExecutor.executeTool("scroll", JSONObject().put("direction", "up"))
+        return if (res.ok) "Upore scroll korlam!" else res.message
+      }
+      lower in listOf("notifications", "open notifications", "notification kholo", "নোটিফিকেশন খোলো") -> {
+        val res = toolExecutor.executeTool("press_global", JSONObject().put("action", "notifications"))
+        return if (res.ok) "Notification panel khule dilam." else res.message
+      }
+      lower in listOf("read notifications", "notification poro", "ki notification eseche") -> {
+        return toolExecutor.executeTool("read_notifications", JSONObject()).message
+      }
+      lower in listOf("read screen", "screen poro", "screen e ki ache") -> {
+        val res = toolExecutor.executeTool("read_screen", JSONObject())
+        return if (res.ok) "Screen-e dekhchi:\n${res.message.take(260)}" else res.message
+      }
+    }
+
+    // 5. Phone Health & Caring Rag Analysis
+    if (lower.contains("analyse") || lower.contains("analyze") || lower.contains("analysis") ||
+      lower.contains("phone status") || lower.contains("phone check") || lower.contains("amar phone") ||
+      lower.contains("ফোন চেক") || lower.contains("অ্যানালাইসিস") || lower.contains("অ্যানালাইজ")
+    ) {
+      val report = health ?: phoneAnalyzer.analyze()
+      val summary = phoneAnalyzer.formatSummaryForPrompt(report)
+      toolExecutor.executeTool("get_phone_status", JSONObject())
+      return buildString {
+        if (rag?.shouldShowRag == true && !rag.reasonMessage.isNullOrBlank()) {
+          appendLine(rag.reasonMessage)
+          appendLine()
+        }
+        append("Tomar phone-er khobor, Rohan: $summary")
+      }
+    }
+
+    // 6. Direct Open App ("open youtube", "whatsapp kholo", "ইউটিউব খোল", etc.)
+    val openSuffixMatch =
+      Regex("""^(.{2,28}?)\s+(?:kholo|khol|khule\s*dao|open\s*(?:koro|karo|kro)?|chalao|chala|open|খোলো|খোল|খুলে\s*দাও|ওপেন\s*(?:করো|কর)?|চালাও|চালা|চালু\s*(?:করো|কর))$""").find(lower)
+    val openPrefixMatch =
+      Regex("""^(?:open|launch|kholo|khol|খোলো|খোল|ওপেন\s*(?:করো|কর)?)\s+(.{2,28})$""").find(lower)
+    val appCandidate =
+      (openSuffixMatch?.groupValues?.getOrNull(1) ?: openPrefixMatch?.groupValues?.getOrNull(1))?.trim()
+    if (!appCandidate.isNullOrBlank() &&
+      appCandidate !in setOf("it", "this", "app", "screen", "notifications", "settings")
+    ) {
+      val res = toolExecutor.executeTool("open_app", JSONObject().put("app_name", appCandidate))
+      return if (res.ok) "Hoye gese jaan! ${res.message}." else res.message
+    }
+
+    return null
   }
 
   companion object {

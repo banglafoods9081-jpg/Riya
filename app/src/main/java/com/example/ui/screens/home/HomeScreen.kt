@@ -177,7 +177,9 @@ fun HomeScreen(
             else -> if (state.voiceState.isServiceRunning) 0.3f else 0.12f
           },
         size = 185.dp,
-        onClick = viewModel::onOrbTapped,
+        onClick = {
+          if (!state.micGranted) onOpenPermissions() else viewModel.onOrbTapped()
+        },
       )
 
       Spacer(modifier = Modifier.height(10.dp))

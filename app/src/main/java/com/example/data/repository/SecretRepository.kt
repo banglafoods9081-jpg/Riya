@@ -24,16 +24,44 @@ sealed interface KeyVerificationResult {
   data class Invalid(val reason: String) : KeyVerificationResult
 }
 
+data class ElevenLabsVoicePreset(
+  val id: String,
+  val label: String,
+  val vibe: String,
+)
+
+val RIYA_ELEVENLABS_VOICES =
+  listOf(
+    ElevenLabsVoicePreset("EXAVITQu4vr4xnSDxMaL", "Bella (Soft & Sweet)", "Misti romantic girl tone"),
+    ElevenLabsVoicePreset("21m00Tcm4TlvDq8ikWAM", "Rachel (Warm & Caring)", "Gentle girlfriend voice"),
+    ElevenLabsVoicePreset("MF3mGyEYCl7XYWbV9V6O", "Elli (Cute & Playful)", "Young bubbly sweet tone"),
+    ElevenLabsVoicePreset("9BWtsMINqrJLrRacOk9x", "Aria (Expressive)", "Natural emotional voice"),
+  )
+
 interface SecretRepository {
   val apiKeyState: StateFlow<ApiKeyState>
+  val elevenLabsKeyState: StateFlow<ApiKeyState>
+  val elevenLabsVoiceId: StateFlow<String>
 
   fun getStoredApiKey(): String?
+
+  fun getStoredElevenLabsApiKey(): String?
+
+  fun getStoredElevenLabsVoiceId(): String
 
   suspend fun verifyAndSaveApiKey(apiKey: String): KeyVerificationResult
 
   suspend fun saveApiKeyLocally(apiKey: String): Result<Unit>
 
   suspend fun clearApiKey(): Result<Unit>
+
+  suspend fun verifyAndSaveElevenLabsKey(apiKey: String): KeyVerificationResult
+
+  suspend fun saveElevenLabsKeyLocally(apiKey: String): Result<Unit>
+
+  suspend fun clearElevenLabsKey(): Result<Unit>
+
+  suspend fun setElevenLabsVoiceId(voiceId: String): Result<Unit>
 }
 
 @Singleton
@@ -46,8 +74,14 @@ constructor(
 ) : SecretRepository {
 
   override val apiKeyState: StateFlow<ApiKeyState> = apiKeyStore.apiKeyState
+  override val elevenLabsKeyState: StateFlow<ApiKeyState> = apiKeyStore.elevenLabsKeyState
+  override val elevenLabsVoiceId: StateFlow<String> = apiKeyStore.elevenLabsVoiceId
 
   override fun getStoredApiKey(): String? = apiKeyStore.getApiKey()
+
+  override fun getStoredElevenLabsApiKey(): String? = apiKeyStore.getElevenLabsApiKey()
+
+  override fun getStoredElevenLabsVoiceId(): String = apiKeyStore.getElevenLabsVoiceId()
 
   override suspend fun verifyAndSaveApiKey(apiKey: String): KeyVerificationResult =
     withContext(ioDispatcher) {
@@ -138,4 +172,55 @@ constructor(
 
   override suspend fun clearApiKey(): Result<Unit> =
     withContext(ioDispatcher) { apiKeyStore.clearApiKey() }
+
+  override suspend fun verifyAndSaveElevenLabsKey(apiKey: String): KeyVerificationResult =
+    withContext(ioDispatcher) {
+      val trimmed = apiKey.trim()
+      if (trimmed.length < 16) {
+        return@withContext KeyVerificationResult.Invalid(
+          "ElevenLabs API key looks too short. Copy the full key from elevenlabs.io."
+        )
+      }
+      val request =
+        Request.Builder()
+          .url("https://api.elevenlabs.io/v1/user")
+          .header("xi-api-key", trimmed)
+          .get()
+          .build()
+
+      try {
+        okHttpClient.newCall(request).execute().use { response ->
+          when {
+            response.isSuccessful -> {
+              apiKeyStore.saveElevenLabsApiKey(trimmed, verified = true)
+              KeyVerificationResult.Valid
+            }
+            response.code == 401 || response.code == 403 -> {
+              KeyVerificationResult.Invalid(
+                "ElevenLabs rejected this key (HTTP ${response.code}). Check your ElevenLabs profile."
+              )
+            }
+            else -> {
+              KeyVerificationResult.Invalid(
+                "ElevenLabs check returned HTTP ${response.code}. You can still save locally."
+              )
+            }
+          }
+        }
+      } catch (e: Exception) {
+        Timber.w(e, "Network error verifying ElevenLabs key")
+        KeyVerificationResult.Invalid(
+          "Could not reach ElevenLabs (${e.localizedMessage ?: "network error"})."
+        )
+      }
+    }
+
+  override suspend fun saveElevenLabsKeyLocally(apiKey: String): Result<Unit> =
+    withContext(ioDispatcher) { apiKeyStore.saveElevenLabsApiKey(apiKey, verified = false) }
+
+  override suspend fun clearElevenLabsKey(): Result<Unit> =
+    withContext(ioDispatcher) { apiKeyStore.clearElevenLabsApiKey() }
+
+  override suspend fun setElevenLabsVoiceId(voiceId: String): Result<Unit> =
+    withContext(ioDispatcher) { apiKeyStore.saveElevenLabsVoiceId(voiceId) }
 }

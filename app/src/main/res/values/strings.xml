@@ -42,7 +42,7 @@
     <string name="api_key_how_to_steps">1. Open Google AI Studio (aistudio.google.com)\n2. Sign in with Google and tap \"Get API key\"\n3. Create a key and paste it above</string>
     <string name="api_key_status_saved">Key stored securely in EncryptedSharedPreferences</string>
     <string name="api_key_status_missing">No Gemini API key saved yet</string>
-    <string name="api_key_verified_success">Verified! Riya\'s Gemini 2.5 Flash brain is ready.</string>
+    <string name="api_key_verified_success">Verified! Riya\'s Gemini 3.8 Flash brain is ready.</string>
 
     <!-- Home & Settings Skeleton -->
     <string name="home_master_active">Riya is Active</string>

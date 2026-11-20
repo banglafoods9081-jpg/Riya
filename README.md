@@ -28,14 +28,15 @@ Built for **Rohan** (Class 11, Saddam sir's student, Durlovepur Eidgah More).
 3. **Allow Restricted Settings (for Sideloaded APK Accessibility & Notification Access)**:
    - On Android 13/14/15, Accessibility and Notification Access are greyed out for sideloaded APKs until unlocked.
    - Inside Riya's Permission screen, tap **Open App Info** (or open Phone Settings -> Apps -> Riya) -> tap the **3-dots menu** (top-right) -> **Allow restricted settings** -> return to Accessibility and turn **Riya** ON.
-4. **Gemini API Key**:
+4. **Gemini API Key & Optional ElevenLabs Cute Voice**:
    - Visit [Google AI Studio](https://aistudio.google.com) -> **Get API key**.
    - Paste it in Riya's **Connect Riya's Brain** screen -> tap **Verify & Save Key** (encrypted locally in `EncryptedSharedPreferences`).
+   - *(Optional for ultra-sweet cute girl voice)*: Paste your **ElevenLabs API Key** on the same screen, choose a preset (`Bella`, `Rachel`, `Elli`, or `Aria`), and tap **Test Voice**. Without an ElevenLabs key, Riya uses Android's built-in female voice automatically.
 
 ---
 
-## Battery Optimization Steps (Prevent Background Voice Service Kill)
-- **Xiaomi / Redmi / POCO (MIUI / HyperOS)**: App Info -> Battery saver -> **No restrictions** + enable **Autostart** + lock Riya in Recents.
+## Battery Optimization & Background Pop-Up Steps (Prevent Service Kill / App Launch Block)
+- **Xiaomi / Redmi / POCO (MIUI / HyperOS)**: App Info -> **Other permissions** -> enable **Display pop-up windows while running in the background** (needed so Riya can open YouTube/WhatsApp/apps from voice or the floating bubble!) + Battery saver -> **No restrictions** + enable **Autostart** + lock Riya in Recents.
 - **Oppo / Realme (ColorOS / Realme UI)**: App Info -> Battery usage -> enable **Allow background activity** + **Allow foreground activity** + Autostart.
 - **Vivo / iQOO (Funtouch OS)**: App Info -> Battery -> **Unrestricted** + Background Power Consumption -> **Allow high background power usage**.
 - **Samsung (One UI)**: App Info -> Battery -> **Unrestricted**.

@@ -25,6 +25,7 @@ import com.example.R
 import com.example.core.safety.SafetyGuard
 import com.example.data.repository.PreferencesRepository
 import com.example.domain.agent.RiyaBrain
+import com.example.domain.model.PreferredLanguage
 import com.example.voice.RiyaTtsManager
 import com.example.voice.VoiceStateHolder
 import com.example.voice.VoiceStatus
@@ -53,6 +54,7 @@ class RiyaVoiceService : Service() {
   private var isListeningActive = false
   private var directTapMode = false
   private var conversationWindowUntilMs = 0L
+  private var forceEnglishRecognizerFallback = false
 
   override fun onCreate() {
     super.onCreate()
@@ -62,10 +64,18 @@ class RiyaVoiceService : Service() {
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     when (intent?.action) {
       ACTION_STOP -> {
+        ensureForeground()
         stopVoiceService()
         return START_NOT_STICKY
       }
+      ACTION_PAUSE_FOR_TTS -> {
+        ensureForeground()
+        mainHandler.removeCallbacksAndMessages(null)
+        cancelRecognition()
+        return START_STICKY
+      }
       ACTION_TOGGLE_MUTE -> {
+        ensureForeground()
         val nextMuted = !voiceStateHolder.state.value.isMuted
         voiceStateHolder.update {
           it.copy(
@@ -78,7 +88,7 @@ class RiyaVoiceService : Service() {
           ttsManager.stop()
           cancelRecognition()
         } else {
-          startListeningCycle(directTap = false)
+          startListeningCycle(directTap = false, forceReset = true)
         }
         updateNotification()
         return START_STICKY
@@ -92,7 +102,7 @@ class RiyaVoiceService : Service() {
         voiceStateHolder.update {
           it.copy(isServiceRunning = true, isMuted = false, status = VoiceStatus.LISTENING, statusHint = "Shunchi jaan...")
         }
-        startListeningCycle(directTap = true)
+        startListeningCycle(directTap = true, forceReset = true)
         updateNotification()
         return START_STICKY
       }
@@ -101,7 +111,9 @@ class RiyaVoiceService : Service() {
         voiceStateHolder.update {
           it.copy(isServiceRunning = true, isMuted = false, status = VoiceStatus.WAKE_STANDBY, statusHint = "Listening for Hey Riya...")
         }
-        startListeningCycle(directTap = false)
+        if (!ttsManager.isSpeaking.value) {
+          startListeningCycle(directTap = false, forceReset = true)
+        }
         updateNotification()
         return START_STICKY
       }
@@ -125,8 +137,9 @@ class RiyaVoiceService : Service() {
     }
   }
 
-  private fun startListeningCycle(directTap: Boolean) {
+  private fun startListeningCycle(directTap: Boolean, forceReset: Boolean = false) {
     if (voiceStateHolder.state.value.isMuted) return
+    if (!directTap && ttsManager.isSpeaking.value) return
     val hasMic =
       ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     if (!hasMic) {
@@ -143,19 +156,39 @@ class RiyaVoiceService : Service() {
     }
 
     directTapMode = directTap
-    mainHandler.post {
+    serviceScope.launch {
+      val prefLang = runCatching { preferencesRepository.settingsFlow.first().preferredLanguage }.getOrNull()
+      val langTag =
+        if (forceEnglishRecognizerFallback) {
+          "en-IN"
+        } else {
+          when (prefLang) {
+            PreferredLanguage.BENGALI -> "bn-IN"
+            PreferredLanguage.HINDI -> "hi-IN"
+            else -> "en-IN"
+          }
+        }
       try {
+        mainHandler.removeCallbacksAndMessages(null)
+        if (forceReset || isListeningActive) {
+          runCatching { speechRecognizer?.cancel() }
+          runCatching { speechRecognizer?.destroy() }
+          speechRecognizer = null
+          isListeningActive = false
+        }
         if (speechRecognizer == null) {
-          speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
+          speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this@RiyaVoiceService).apply {
             setRecognitionListener(createRecognitionListener())
           }
         }
         val recognizerIntent =
           Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN")
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, langTag)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 850L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 650L)
           }
         isListeningActive = true
         voiceStateHolder.update {
@@ -167,7 +200,8 @@ class RiyaVoiceService : Service() {
         speechRecognizer?.startListening(recognizerIntent)
       } catch (e: Exception) {
         Timber.e(e, "Failed to start SpeechRecognizer")
-        scheduleRestart(1500L)
+        destroyRecognizer()
+        scheduleRestart(900L, forceReset = true)
       }
     }
   }
@@ -200,18 +234,40 @@ class RiyaVoiceService : Service() {
         if (!voiceStateHolder.state.value.isServiceRunning || voiceStateHolder.state.value.isMuted) {
           return
         }
+        if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+          voiceStateHolder.update {
+            it.copy(isServiceRunning = false, status = VoiceStatus.IDLE, statusHint = "Microphone permission allow koro!")
+          }
+          return
+        }
+        if (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED || error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE) {
+          forceEnglishRecognizerFallback = true
+          destroyRecognizer()
+          scheduleRestart(300L, forceReset = true)
+          return
+        }
+        val shouldHardReset =
+          error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
+            error == SpeechRecognizer.ERROR_CLIENT ||
+            error == SpeechRecognizer.ERROR_AUDIO ||
+            error == SpeechRecognizer.ERROR_SERVER_DISCONNECTED
+        if (shouldHardReset) {
+          destroyRecognizer()
+        }
         val delayMs =
           when (error) {
-            SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
-            SpeechRecognizer.ERROR_AUDIO -> 1200L
             SpeechRecognizer.ERROR_NO_MATCH,
-            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> 450L
-            else -> 1500L
+            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> 250L
+            SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
+            SpeechRecognizer.ERROR_CLIENT -> 650L
+            SpeechRecognizer.ERROR_NETWORK,
+            SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> 1400L
+            else -> 900L
           }
-        if (directTapMode && error == SpeechRecognizer.ERROR_NO_MATCH) {
+        if (directTapMode && (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)) {
           directTapMode = false
         }
-        scheduleRestart(delayMs)
+        scheduleRestart(delayMs, forceReset = shouldHardReset)
       }
 
       override fun onResults(results: Bundle?) {
@@ -238,7 +294,7 @@ class RiyaVoiceService : Service() {
 
   private fun handleSpokenText(spoken: String) {
     if (spoken.isEmpty()) {
-      scheduleRestart(400L)
+      scheduleRestart(250L)
       return
     }
     serviceScope.launch {
@@ -248,7 +304,7 @@ class RiyaVoiceService : Service() {
       val shouldRespond = directTapMode || !settings.wakeWordEnabled || hasWakeWord || inWindow || SafetyGuard.isEmergencyStopCommand(spoken)
 
       if (!shouldRespond) {
-        scheduleRestart(400L)
+        scheduleRestart(250L)
         return@launch
       }
 
@@ -280,7 +336,7 @@ class RiyaVoiceService : Service() {
         return@launch
       }
 
-      conversationWindowUntilMs = System.currentTimeMillis() + 18_000L
+      conversationWindowUntilMs = System.currentTimeMillis() + 25_000L
       voiceStateHolder.update {
         it.copy(
           lastRiyaReply = reply.text,
@@ -293,7 +349,11 @@ class RiyaVoiceService : Service() {
 
       ttsManager.speak(reply.text) {
         if (voiceStateHolder.state.value.isServiceRunning && !voiceStateHolder.state.value.isMuted) {
-          startListeningCycle(directTap = false)
+          startListeningCycle(directTap = false, forceReset = true)
+        } else {
+          voiceStateHolder.update {
+            it.copy(status = VoiceStatus.IDLE, statusHint = "Tap the orb to talk with Riya")
+          }
         }
       }
     }
@@ -301,24 +361,32 @@ class RiyaVoiceService : Service() {
 
   private fun containsWakeWord(text: String): Boolean {
     val lower = text.lowercase()
-    return lower.contains("hey riya") ||
-      lower.contains("hi riya") ||
-      lower.contains("ok riya") ||
-      lower.startsWith("riya") ||
-      lower.contains("রিয়া")
+    return WAKE_WORD_REGEX.containsMatchIn(lower) ||
+      lower.contains("রিয়া") ||
+      lower.contains("রিয়া")
   }
 
   private fun stripWakeWord(text: String): String {
     return text
-      .replace(Regex("(?i)^(hey|hi|ok)?\\s*riya[,\\s]*"), "")
+      .replace(
+        Regex("(?i)^(hey|hi|ok|hello|o|হে|হাই|হ্যালো|ও)?\\s*(riya|ria|reeya|reya|রিয়া|রিয়া)[,\\s]*"),
+        "",
+      )
       .trim()
   }
 
-  private fun scheduleRestart(delayMs: Long) {
+  private fun destroyRecognizer() {
+    isListeningActive = false
+    runCatching { speechRecognizer?.cancel() }
+    runCatching { speechRecognizer?.destroy() }
+    speechRecognizer = null
+  }
+
+  private fun scheduleRestart(delayMs: Long, forceReset: Boolean = false) {
     mainHandler.removeCallbacksAndMessages(null)
     mainHandler.postDelayed({
       if (voiceStateHolder.state.value.isServiceRunning && !voiceStateHolder.state.value.isMuted) {
-        startListeningCycle(directTap = false)
+        startListeningCycle(directTap = false, forceReset = forceReset)
       }
     }, delayMs)
   }
@@ -334,8 +402,7 @@ class RiyaVoiceService : Service() {
   private fun stopVoiceService() {
     mainHandler.removeCallbacksAndMessages(null)
     ttsManager.stop()
-    speechRecognizer?.destroy()
-    speechRecognizer = null
+    destroyRecognizer()
     voiceStateHolder.update {
       it.copy(
         isServiceRunning = false,
@@ -403,25 +470,43 @@ class RiyaVoiceService : Service() {
 
   override fun onDestroy() {
     mainHandler.removeCallbacksAndMessages(null)
-    speechRecognizer?.destroy()
-    speechRecognizer = null
+    destroyRecognizer()
     serviceScope.cancel()
+    voiceStateHolder.update {
+      it.copy(
+        isServiceRunning = false,
+        status = VoiceStatus.IDLE,
+        amplitude = 0f,
+      )
+    }
     super.onDestroy()
   }
 
   override fun onBind(intent: Intent?): IBinder? = null
 
   companion object {
+    private val WAKE_WORD_REGEX = Regex("""\b(riya|ria|reeya|reya)\b""", RegexOption.IGNORE_CASE)
     const val CHANNEL_ID = "riya_voice_channel"
     const val NOTIFICATION_ID = 1001
     const val ACTION_START = "com.example.action.START_VOICE"
     const val ACTION_TAP_TO_TALK = "com.example.action.TAP_TO_TALK"
+    const val ACTION_PAUSE_FOR_TTS = "com.example.action.PAUSE_FOR_TTS"
     const val ACTION_TOGGLE_MUTE = "com.example.action.TOGGLE_MUTE"
     const val ACTION_STOP = "com.example.action.STOP_VOICE"
 
     fun start(context: Context, action: String = ACTION_START) {
+      if (action == ACTION_STOP) {
+        stop(context)
+        return
+      }
       val intent = Intent(context, RiyaVoiceService::class.java).setAction(action)
       ContextCompat.startForegroundService(context, intent)
+    }
+
+    fun stop(context: Context) {
+      runCatching {
+        context.stopService(Intent(context, RiyaVoiceService::class.java))
+      }
     }
   }
 }

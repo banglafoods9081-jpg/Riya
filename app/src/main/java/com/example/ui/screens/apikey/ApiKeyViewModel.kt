@@ -6,6 +6,7 @@ import com.example.core.security.ApiKeyState
 import com.example.data.repository.KeyVerificationResult
 import com.example.data.repository.PreferencesRepository
 import com.example.data.repository.SecretRepository
+import com.example.voice.RiyaTtsManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -31,6 +32,9 @@ sealed interface ApiKeyActionStatus {
 data class ApiKeyScreenState(
   val inputKey: String = "",
   val actionStatus: ApiKeyActionStatus = ApiKeyActionStatus.Idle,
+  val elevenLabsInputKey: String = "",
+  val elevenLabsActionStatus: ApiKeyActionStatus = ApiKeyActionStatus.Idle,
+  val customVoiceIdDraft: String = "",
 )
 
 @HiltViewModel
@@ -39,6 +43,7 @@ class ApiKeyViewModel
 constructor(
   private val secretRepository: SecretRepository,
   private val preferencesRepository: PreferencesRepository,
+  private val ttsManager: RiyaTtsManager,
 ) : ViewModel() {
 
   val storedKeyState: StateFlow<ApiKeyState> =
@@ -48,11 +53,55 @@ constructor(
       initialValue = ApiKeyState.Missing,
     )
 
+  val storedElevenLabsState: StateFlow<ApiKeyState> =
+    secretRepository.elevenLabsKeyState.stateIn(
+      scope = viewModelScope,
+      started = SharingStarted.WhileSubscribed(5_000),
+      initialValue = ApiKeyState.Missing,
+    )
+
+  val selectedVoiceId: StateFlow<String> =
+    secretRepository.elevenLabsVoiceId.stateIn(
+      scope = viewModelScope,
+      started = SharingStarted.WhileSubscribed(5_000),
+      initialValue = secretRepository.getStoredElevenLabsVoiceId(),
+    )
+
   private val _uiState = MutableStateFlow(ApiKeyScreenState())
   val uiState: StateFlow<ApiKeyScreenState> = _uiState.asStateFlow()
 
   fun onKeyInputChanged(value: String) {
     _uiState.update { it.copy(inputKey = value, actionStatus = ApiKeyActionStatus.Idle) }
+  }
+
+  fun onElevenLabsInputChanged(value: String) {
+    _uiState.update {
+      it.copy(elevenLabsInputKey = value, elevenLabsActionStatus = ApiKeyActionStatus.Idle)
+    }
+  }
+
+  fun onCustomVoiceIdChanged(value: String) {
+    _uiState.update { it.copy(customVoiceIdDraft = value) }
+  }
+
+  fun selectVoicePreset(voiceId: String) {
+    viewModelScope.launch {
+      secretRepository.setElevenLabsVoiceId(voiceId)
+    }
+  }
+
+  fun saveCustomVoiceId() {
+    val clean = _uiState.value.customVoiceIdDraft.trim()
+    if (clean.isEmpty()) return
+    viewModelScope.launch {
+      secretRepository.setElevenLabsVoiceId(clean)
+      _uiState.update {
+        it.copy(
+          customVoiceIdDraft = "",
+          elevenLabsActionStatus = ApiKeyActionStatus.SavedLocalOnly("Custom Voice ID updated!"),
+        )
+      }
+    }
   }
 
   fun verifyAndSave(onCompleteIfOnboarding: () -> Unit, isOnboardingFlow: Boolean) {
@@ -75,7 +124,7 @@ constructor(
               inputKey = "",
               actionStatus =
                 ApiKeyActionStatus.VerifiedSuccess(
-                  "Verified! Riya's Gemini 2.5 Flash brain is ready."
+                  "Verified! Riya's Gemini 3.8 Flash brain is ready."
                 ),
             )
           }
@@ -135,6 +184,51 @@ constructor(
         )
       }
     }
+  }
+
+  fun verifyAndSaveElevenLabs() {
+    val candidate = _uiState.value.elevenLabsInputKey.trim()
+    if (candidate.isEmpty()) {
+      _uiState.update {
+        it.copy(
+          elevenLabsActionStatus =
+            ApiKeyActionStatus.Error("Paste your ElevenLabs API key first.")
+        )
+      }
+      return
+    }
+    viewModelScope.launch {
+      _uiState.update { it.copy(elevenLabsActionStatus = ApiKeyActionStatus.Verifying) }
+      when (val res = secretRepository.verifyAndSaveElevenLabsKey(candidate)) {
+        is KeyVerificationResult.Valid -> {
+          _uiState.update {
+            it.copy(
+              elevenLabsInputKey = "",
+              elevenLabsActionStatus =
+                ApiKeyActionStatus.VerifiedSuccess(
+                  "ElevenLabs cute voice connected! Tap Test Voice to hear Riya."
+                ),
+            )
+          }
+        }
+        is KeyVerificationResult.Invalid -> {
+          _uiState.update { it.copy(elevenLabsActionStatus = ApiKeyActionStatus.Error(res.reason)) }
+        }
+      }
+    }
+  }
+
+  fun clearElevenLabsKey() {
+    viewModelScope.launch {
+      secretRepository.clearElevenLabsKey()
+      _uiState.update {
+        it.copy(elevenLabsInputKey = "", elevenLabsActionStatus = ApiKeyActionStatus.Idle)
+      }
+    }
+  }
+
+  fun testVoiceSample() {
+    ttsManager.speak("Hii Rohan jaan! Ami tomar Riya. Kemon acho shona?")
   }
 
   fun completeOnboardingWithoutKey(onDone: () -> Unit) {

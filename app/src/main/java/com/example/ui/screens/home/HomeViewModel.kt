@@ -129,7 +129,7 @@ constructor(
       preferencesRepository.setMasterEnabled(enabled)
       if (!enabled) {
         ttsManager.stop()
-        RiyaVoiceService.start(context, RiyaVoiceService.ACTION_STOP)
+        RiyaVoiceService.stop(context)
       }
     }
   }
@@ -152,7 +152,7 @@ constructor(
 
   fun toggleBackgroundVoiceService() {
     if (uiState.value.voiceState.isServiceRunning) {
-      RiyaVoiceService.start(context, RiyaVoiceService.ACTION_STOP)
+      RiyaVoiceService.stop(context)
     } else {
       RiyaVoiceService.start(context, RiyaVoiceService.ACTION_START)
     }
@@ -173,6 +173,10 @@ constructor(
     if (msg.isEmpty()) return
     textDraftFlow.value = ""
     viewModelScope.launch {
+      val wasServiceRunning = voiceStateHolder.state.value.isServiceRunning
+      if (wasServiceRunning) {
+        RiyaVoiceService.start(context, RiyaVoiceService.ACTION_PAUSE_FOR_TTS)
+      }
       if (ttsManager.isSpeaking.value) ttsManager.stop()
       voiceStateHolder.update {
         it.copy(liveTranscript = msg, status = VoiceStatus.THINKING, statusHint = "Bhabchi jaan...")
@@ -188,13 +192,19 @@ constructor(
       }
       if (reply.isEmergencyStop) {
         ttsManager.stop()
+        if (wasServiceRunning) RiyaVoiceService.stop(context)
       } else {
         ttsManager.speak(reply.text) {
-          voiceStateHolder.update { state ->
-            state.copy(
-              status = if (state.isServiceRunning) VoiceStatus.WAKE_STANDBY else VoiceStatus.IDLE,
-              statusHint = if (state.isServiceRunning) "Listening for Hey Riya..." else "Tap the orb to talk with Riya",
-            )
+          val latest = voiceStateHolder.state.value
+          if (latest.isServiceRunning && !latest.isMuted) {
+            RiyaVoiceService.start(context, RiyaVoiceService.ACTION_START)
+          } else {
+            voiceStateHolder.update { state ->
+              state.copy(
+                status = VoiceStatus.IDLE,
+                statusHint = "Tap the orb to talk with Riya",
+              )
+            }
           }
         }
       }

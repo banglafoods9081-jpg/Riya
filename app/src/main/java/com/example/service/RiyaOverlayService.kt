@@ -162,7 +162,7 @@ class RiyaOverlayService : Service() {
         ContextCompat.startForegroundService(context, intent)
       } else {
         _isShowing.value = false
-        context.startService(intent)
+        runCatching { context.stopService(Intent(context, RiyaOverlayService::class.java)) }
       }
     }
   }

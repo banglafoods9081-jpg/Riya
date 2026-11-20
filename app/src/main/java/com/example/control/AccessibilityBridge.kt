@@ -266,25 +266,25 @@ class AccessibilityBridge @Inject constructor() {
   suspend fun automateYouTubeFirstResult(query: String): Result<String> {
     val svc = service ?: return Result.failure(IllegalStateException("Accessibility not active"))
     // Wait briefly for YouTube search results to settle
-    delay(1600L)
+    delay(950L)
     // Attempt 1: If search bar isn't filled, try clicking Search button and typing
     val root1 = svc.rootInActiveWindow
     if (root1 != null) {
       val searchBtn = findNodeByText(root1, "Search") ?: findNodeById(root1, "menu_search")
       if (searchBtn != null && findFocusedOrFirstEditable(root1) == null) {
         clickNodeOrParent(searchBtn)
-        delay(600L)
+        delay(450L)
         typeText(query)
-        delay(500L)
+        delay(350L)
         // Tap top suggestion or keyboard search area near bottom-right
         val metrics = svc.resources.displayMetrics
         tapCoordinates(metrics.widthPixels * 0.9f, metrics.heightPixels * 0.92f)
-        delay(1600L)
+        delay(1100L)
       }
     }
 
-    // Attempt 2: Tap first video card in YouTube results (usually middle-upper feed below search bar)
-    repeat(3) {
+    // Attempt 2: Tap first video card in YouTube results
+    repeat(5) {
       val root = svc.rootInActiveWindow
       if (root != null) {
         val candidate = findFirstYouTubeVideoNode(root)
@@ -292,7 +292,7 @@ class AccessibilityBridge @Inject constructor() {
           return Result.success("Playing '$query' on YouTube")
         }
       }
-      delay(800L)
+      delay(450L)
     }
     return Result.success("Opened YouTube search for '$query'")
   }

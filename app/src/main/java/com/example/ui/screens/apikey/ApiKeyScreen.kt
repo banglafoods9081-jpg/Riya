@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -24,13 +26,17 @@ import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.RecordVoiceOver
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -61,6 +67,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.core.security.ApiKeyState
+import com.example.data.repository.RIYA_ELEVENLABS_VOICES
 import com.example.ui.components.RiyaGlassCard
 import com.example.ui.theme.AmethystGlow
 import com.example.ui.theme.ErrorCoral
@@ -72,7 +79,7 @@ import com.example.ui.theme.SuccessMint
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.WarningAmber
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ApiKeyScreen(
   isOnboardingFlow: Boolean,
@@ -82,8 +89,11 @@ fun ApiKeyScreen(
 ) {
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
   val storedState by viewModel.storedKeyState.collectAsStateWithLifecycle()
+  val storedElevenLabsState by viewModel.storedElevenLabsState.collectAsStateWithLifecycle()
+  val selectedVoiceId by viewModel.selectedVoiceId.collectAsStateWithLifecycle()
   val clipboardManager = LocalClipboardManager.current
   var showKey by remember { mutableStateOf(false) }
+  var showElKey by remember { mutableStateOf(false) }
 
   Scaffold(
     containerColor = ObsidianNight,
@@ -302,6 +312,144 @@ fun ApiKeyScreen(
             style = MaterialTheme.typography.bodyMedium,
             color = TextSecondary,
           )
+        }
+
+        // ElevenLabs Cute Girl Voice Card (Optional Ultra-Sweet Real Voice)
+        RiyaGlassCard {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+              imageVector = Icons.Rounded.RecordVoiceOver,
+              contentDescription = null,
+              tint = SakuraRose,
+              modifier = Modifier.size(22.dp),
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+              Text(
+                text = "ElevenLabs Cute Girl Voice (Optional)",
+                style = MaterialTheme.typography.titleMedium,
+                color = RoseGoldWarm,
+              )
+              val elStatus =
+                when (val s = storedElevenLabsState) {
+                  is ApiKeyState.Saved -> "Connected • ${s.maskedKey}"
+                  is ApiKeyState.Missing -> "Not set (using built-in sweet Android TTS)"
+                  is ApiKeyState.StorageError -> s.message
+                }
+              Text(text = elStatus, style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+            }
+            if (storedElevenLabsState is ApiKeyState.Saved) {
+              IconButton(
+                onClick = viewModel::clearElevenLabsKey,
+                modifier = Modifier.minimumInteractiveComponentSize().testTag("clear_elevenlabs_key_button"),
+              ) {
+                Icon(
+                  imageVector = Icons.Rounded.DeleteOutline,
+                  contentDescription = "Remove ElevenLabs key",
+                  tint = ErrorCoral,
+                )
+              }
+            }
+          }
+
+          Spacer(modifier = Modifier.height(10.dp))
+
+          OutlinedTextField(
+            value = uiState.elevenLabsInputKey,
+            onValueChange = viewModel::onElevenLabsInputChanged,
+            label = { Text("ElevenLabs API Key") },
+            placeholder = { Text("sk_...") },
+            singleLine = true,
+            visualTransformation =
+              if (showElKey) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+              Row {
+                IconButton(
+                  onClick = {
+                    val pasted = clipboardManager.getText()?.text.orEmpty().trim()
+                    if (pasted.isNotEmpty()) viewModel.onElevenLabsInputChanged(pasted)
+                  },
+                ) {
+                  Icon(imageVector = Icons.Rounded.ContentPaste, contentDescription = "Paste ElevenLabs key")
+                }
+                IconButton(onClick = { showElKey = !showElKey }) {
+                  Icon(
+                    imageVector = if (showElKey) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                    contentDescription = "Toggle ElevenLabs key visibility",
+                  )
+                }
+              }
+            },
+            modifier = Modifier.fillMaxWidth().testTag("elevenlabs_key_input"),
+          )
+
+          Spacer(modifier = Modifier.height(10.dp))
+
+          when (val elStatus = uiState.elevenLabsActionStatus) {
+            is ApiKeyActionStatus.VerifiedSuccess -> {
+              Text(elStatus.message, style = MaterialTheme.typography.bodyMedium, color = SuccessMint)
+              Spacer(modifier = Modifier.height(6.dp))
+            }
+            is ApiKeyActionStatus.SavedLocalOnly -> {
+              Text(elStatus.message, style = MaterialTheme.typography.bodyMedium, color = AmethystGlow)
+              Spacer(modifier = Modifier.height(6.dp))
+            }
+            is ApiKeyActionStatus.Error -> {
+              Text(elStatus.message, style = MaterialTheme.typography.bodyMedium, color = ErrorCoral)
+              Spacer(modifier = Modifier.height(6.dp))
+            }
+            else -> Unit
+          }
+
+          val isVerifyingEl = uiState.elevenLabsActionStatus is ApiKeyActionStatus.Verifying
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            FilledTonalButton(
+              onClick = viewModel::verifyAndSaveElevenLabs,
+              enabled = !isVerifyingEl,
+              modifier = Modifier.weight(1f).testTag("verify_elevenlabs_button"),
+            ) {
+              Text(if (isVerifyingEl) "Checking..." else "Save ElevenLabs Key")
+            }
+            OutlinedButton(
+              onClick = viewModel::testVoiceSample,
+              modifier = Modifier.testTag("test_voice_button"),
+            ) {
+              Icon(Icons.Rounded.VolumeUp, contentDescription = null, modifier = Modifier.size(18.dp))
+              Spacer(modifier = Modifier.width(6.dp))
+              Text("Test Voice")
+            }
+          }
+
+          Spacer(modifier = Modifier.height(12.dp))
+          Text("Choose Sweet Girl Voice Preset:", style = MaterialTheme.typography.labelLarge, color = TextSecondary)
+          Spacer(modifier = Modifier.height(6.dp))
+          FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+          ) {
+            RIYA_ELEVENLABS_VOICES.forEach { preset ->
+              FilterChip(
+                selected = selectedVoiceId == preset.id,
+                onClick = { viewModel.selectVoicePreset(preset.id) },
+                label = { Text(preset.label) },
+                modifier = Modifier.minimumInteractiveComponentSize(),
+              )
+            }
+          }
+
+          Spacer(modifier = Modifier.height(8.dp))
+          Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+              value = uiState.customVoiceIdDraft,
+              onValueChange = viewModel::onCustomVoiceIdChanged,
+              label = { Text("Custom Voice ID (Optional)") },
+              singleLine = true,
+              modifier = Modifier.weight(1f),
+            )
+            FilledTonalButton(onClick = viewModel::saveCustomVoiceId) {
+              Text("Apply")
+            }
+          }
         }
 
         if (isOnboardingFlow) {

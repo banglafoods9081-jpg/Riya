@@ -18,22 +18,22 @@ class AppLauncher @Inject constructor(@ApplicationContext private val context: C
 
   private val aliases: Map<String, List<String>> =
     mapOf(
-      "youtube" to listOf("youtube", "yt", "ইউটিউব"),
-      "whatsapp" to listOf("whatsapp", "whats app", "wp", "হোয়াটসঅ্যাপ"),
-      "spotify" to listOf("spotify", "gaan", "music"),
-      "chrome" to listOf("chrome", "browser", "google chrome"),
-      "instagram" to listOf("instagram", "insta", "ig"),
-      "facebook" to listOf("facebook", "fb"),
-      "telegram" to listOf("telegram", "tg"),
-      "camera" to listOf("camera", "cam", "chobi", "ক্যামেরা"),
-      "gallery" to listOf("gallery", "photos", "google photos", "গ্যালারি"),
+      "youtube" to listOf("youtube", "yt", "ইউটিউব", "यूट्यूब"),
+      "whatsapp" to listOf("whatsapp", "whats app", "wp", "হোয়াটসঅ্যাপ", "হোয়াটসঅ্যাপ", "व्हाट्सएप"),
+      "spotify" to listOf("spotify", "gaan", "music", "স্পটিফাই"),
+      "chrome" to listOf("chrome", "browser", "google chrome", "ক্রোম"),
+      "instagram" to listOf("instagram", "insta", "ig", "ইনস্টাগ্রাম", "इंस्टाग्राम"),
+      "facebook" to listOf("facebook", "fb", "ফেসবুক", "फेसबुक"),
+      "telegram" to listOf("telegram", "tg", "টেলিগ্রাম", "टेलीग्राम"),
+      "camera" to listOf("camera", "cam", "chobi", "ক্যামেরা", "कैमरा"),
+      "gallery" to listOf("gallery", "photos", "google photos", "গ্যালারি", "गैलरी"),
       "calculator" to listOf("calculator", "calc", "hisab", "ক্যালকুলেটর"),
       "clock" to listOf("clock", "alarm", "ghori", "timer", "ঘড়ি"),
-      "maps" to listOf("maps", "google maps", "map", "rasta"),
-      "play store" to listOf("play store", "playstore", "google play"),
+      "maps" to listOf("maps", "google maps", "map", "rasta", "ম্যাপ"),
+      "play store" to listOf("play store", "playstore", "google play", "প্লে স্টোর"),
       "settings" to listOf("settings", "setting", "সেটিংস"),
-      "phone" to listOf("phone", "dialer", "call", "contacts"),
-      "messages" to listOf("messages", "sms", "messaging"),
+      "phone" to listOf("phone", "dialer", "call", "contacts", "ফোন"),
+      "messages" to listOf("messages", "sms", "messaging", "মেসেজ"),
     )
 
   fun getInstalledLauncherApps(): List<InstalledAppInfo> {
@@ -101,10 +101,31 @@ class AppLauncher @Inject constructor(@ApplicationContext private val context: C
     return raw
       .lowercase()
       .replace("open", "")
+      .replace("launch", "")
       .replace("kholo", "")
       .replace("khola", "")
+      .replace("khol", "")
+      .replace("khule", "")
       .replace("chalao", "")
+      .replace("chala", "")
+      .replace("koro", "")
+      .replace("karo", "")
+      .replace("kro", "")
+      .replace("খুলে দাও", "")
+      .replace("চালু করো", "")
+      .replace("চালু কর", "")
+      .replace("ওপেন", "")
+      .replace("খোলো", "")
+      .replace("খোলা", "")
+      .replace("খোল", "")
+      .replace("চালাও", "")
+      .replace("চালা", "")
+      .replace("করো", "")
+      .replace("কর", "")
+      .replace("দাও", "")
+      .replace("অ্যাপ", "")
       .replace("app", "")
+      .replace("the", "")
       .trim()
   }
 
