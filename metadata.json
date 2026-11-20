@@ -1,0 +1,6 @@
+{
+  "name": "Riya",
+  "description": "Romantic Bengali, Hindi, and English AI voice assistant and Android phone controller",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

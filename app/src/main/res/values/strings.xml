@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Riya</string>
+    <string name="app_tagline">Your Warm Voice Companion &amp; Phone Controller</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_greeting_title">Hii, ami Riya</string>
+    <string name="onboarding_greeting_subtitle">Tomar kotha shunte, phone chalate, ar pashe thakte ami ready. Bengali, Banglish, Hindi ba English — je bhashay bolbe, sheibhabei kotha bolbo.</string>
+    <string name="onboarding_name_label">Tomake ki bole dakbo? (Your Name)</string>
+    <string name="onboarding_name_placeholder">e.g., Rohan</string>
+    <string name="onboarding_language_label">Default Language</string>
+    <string name="onboarding_safety_title">Safety &amp; Privacy Promise</string>
+    <string name="onboarding_safety_body">All chats and memories stay locally on your device. Your Gemini API key is encrypted with Android Keystore. Riya never automates banking, UPI PINs, OTPs, or password screens.</string>
+    <string name="onboarding_continue">Start Setup</string>
+
+    <!-- Permissions -->
+    <string name="permissions_title">Riya Permissions</string>
+    <string name="permissions_subtitle">Step-by-step access so Riya can hear you, speak warmly, and control your phone safely.</string>
+    <string name="permissions_progress_format">%1$d of %2$d enabled</string>
+    <string name="permissions_wizard_mode">Guided Step</string>
+    <string name="permissions_checklist_mode">All List</string>
+    <string name="permissions_grant">Allow Access</string>
+    <string name="permissions_granted">Granted</string>
+    <string name="permissions_skip">Skip for Now</string>
+    <string name="permissions_next">Next Step</string>
+    <string name="permissions_previous">Back</string>
+    <string name="permissions_done">Continue to API Key</string>
+    <string name="permissions_restricted_hint">Android 13/14/15 Sideload Tip: If Accessibility is greyed out, open App Info -> 3-dots menu -> Allow restricted settings.</string>
+    <string name="permissions_open_app_info">Open App Info</string>
+
+    <!-- API Key Setup -->
+    <string name="api_key_title">Connect Riya\'s Brain</string>
+    <string name="api_key_subtitle">Enter your Gemini API key. It is encrypted locally via Android Keystore (EncryptedSharedPreferences) and never leaves your phone except to talk to Gemini.</string>
+    <string name="api_key_field_label">Gemini API Key</string>
+    <string name="api_key_field_placeholder">AIzaSy...</string>
+    <string name="api_key_verify_save">Verify &amp; Save Key</string>
+    <string name="api_key_save_without_verify">Save Locally</string>
+    <string name="api_key_clear">Remove Key</string>
+    <string name="api_key_skip_for_now">Skip for Now</string>
+    <string name="api_key_how_to_title">How to get a free Gemini API Key</string>
+    <string name="api_key_how_to_steps">1. Open Google AI Studio (aistudio.google.com)\n2. Sign in with Google and tap \"Get API key\"\n3. Create a key and paste it above</string>
+    <string name="api_key_status_saved">Key stored securely in EncryptedSharedPreferences</string>
+    <string name="api_key_status_missing">No Gemini API key saved yet</string>
+    <string name="api_key_verified_success">Verified! Riya\'s Gemini 2.5 Flash brain is ready.</string>
+
+    <!-- Home & Settings Skeleton -->
+    <string name="home_master_active">Riya is Active</string>
+    <string name="home_master_paused">Riya is Paused</string>
+    <string name="home_greeting_format">Kemon acho, %1$s?</string>
+    <string name="home_greeting_default">Kemon acho, jaan?</string>
+    <string name="home_voice_phase_note">Phase 1 Setup Complete — Voice Engine &amp; Phone Control unlock in Phases 2–3.</string>
+    <string name="home_card_api_title">Gemini Brain Key</string>
+    <string name="home_card_permissions_title">System Permissions</string>
+    <string name="home_card_persona_title">Persona &amp; Language</string>
+    <string name="home_quick_setup_permissions">Manage Permissions</string>
+    <string name="home_quick_setup_apikey">Manage API Key</string>
+    <string name="home_quick_settings">Settings</string>
+    <string name="settings_title">Riya Settings</string>
+    <string name="settings_persona_intensity">Romantic Warmth Intensity</string>
+    <string name="settings_wake_word">Wake Word (\"Hey Riya\")</string>
+    <string name="settings_tts_speed">Voice Speed</string>
+    <string name="settings_tts_pitch">Voice Pitch</string>
+    <string name="settings_rerun_onboarding">Re-run Onboarding Wizard</string>
+</resources>
