@@ -54,6 +54,8 @@ constructor(
   private val _latestRagStatus = MutableStateFlow<RagStatus?>(null)
   val latestRagStatus: StateFlow<RagStatus?> = _latestRagStatus.asStateFlow()
 
+  @Volatile private var activeModel: String = RiyaIdentity.PRIMARY_GEMINI_MODEL
+
   suspend fun processUserMessage(userText: String): RiyaReply =
     withContext(ioDispatcher) {
       val trimmed = userText.trim()
@@ -201,21 +203,7 @@ constructor(
               .put("maxOutputTokens", 512),
           )
 
-      val request =
-        Request.Builder()
-          .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent")
-          .header("x-goog-api-key", apiKey)
-          .post(payload.toString().toRequestBody("application/json".toMediaType()))
-          .build()
-
-      val responseJson =
-        okHttpClient.newCall(request).execute().use { resp ->
-          val body = resp.body?.string().orEmpty()
-          if (!resp.isSuccessful) {
-            throw IllegalStateException("Gemini HTTP ${resp.code}: ${body.take(180)}")
-          }
-          JSONObject(body)
-        }
+      val responseJson = executeGenerateContentWithModelFallback(apiKey, payload)
 
       val candidates = responseJson.optJSONArray("candidates")
       val firstCandidate = candidates?.optJSONObject(0)
@@ -299,6 +287,49 @@ constructor(
     return "Kaj ta shesh korlam jaan!"
   }
 
+  private fun executeGenerateContentWithModelFallback(
+    apiKey: String,
+    payload: JSONObject,
+  ): JSONObject {
+    val tried = linkedSetOf<String>()
+    val queue = ArrayDeque<String>()
+    queue.add(activeModel)
+    RiyaIdentity.FALLBACK_GEMINI_MODELS.forEach { if (it != activeModel) queue.add(it) }
+
+    var lastError: String? = null
+    while (queue.isNotEmpty()) {
+      val model = queue.removeFirst()
+      if (!tried.add(model)) continue
+
+      val request =
+        Request.Builder()
+          .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
+          .header("x-goog-api-key", apiKey)
+          .post(payload.toString().toRequestBody("application/json".toMediaType()))
+          .build()
+
+      okHttpClient.newCall(request).execute().use { resp ->
+        val body = resp.body?.string().orEmpty()
+        if (resp.isSuccessful) {
+          activeModel = model
+          return JSONObject(body)
+        }
+        val cleanMsg = extractGeminiErrorMessage(body) ?: "HTTP ${resp.code}"
+        lastError = "HTTP ${resp.code}: $cleanMsg"
+
+        if (resp.code == 404) {
+          val suggested = extractSuggestedModel(body)
+          if (suggested != null && !tried.contains(suggested)) {
+            queue.addFirst(suggested)
+          }
+        } else {
+          throw IllegalStateException(lastError)
+        }
+      }
+    }
+    throw IllegalStateException(lastError ?: "No compatible Gemini model available")
+  }
+
   private suspend fun tryOfflineFallback(input: String, phoneSummary: String?): String? {
     val lower = input.lowercase()
     return when {
@@ -317,6 +348,20 @@ constructor(
         if (res.ok) "Hoye gese jaan! ${res.message}" else res.message
       }
       else -> null
+    }
+  }
+
+  companion object {
+    private val SUGGESTED_MODEL_REGEX = Regex("""use\s+models/([a-zA-Z0-9._-]+)""", RegexOption.IGNORE_CASE)
+
+    internal fun extractSuggestedModel(errorBody: String): String? {
+      return SUGGESTED_MODEL_REGEX.find(errorBody)?.groupValues?.getOrNull(1)
+    }
+
+    internal fun extractGeminiErrorMessage(errorBody: String): String? {
+      return runCatching {
+        JSONObject(errorBody).optJSONObject("error")?.optString("message")?.takeIf { it.isNotBlank() }
+      }.getOrNull()
     }
   }
 }

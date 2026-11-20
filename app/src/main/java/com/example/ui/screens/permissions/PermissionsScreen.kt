@@ -82,6 +82,7 @@ import com.example.R
 import com.example.core.permissions.PermissionKind
 import com.example.core.permissions.PermissionStatusItem
 import com.example.core.permissions.RiyaPermission
+import com.example.service.RiyaOverlayService
 import com.example.ui.components.RiyaGlassCard
 import com.example.ui.theme.AmethystGlow
 import com.example.ui.theme.ObsidianNight
@@ -130,6 +131,9 @@ fun PermissionsScreen(
     }
 
   val launchPermissionRequest: (RiyaPermission) -> Unit = { permission ->
+    if (RiyaOverlayService.isShowing.value) {
+      RiyaOverlayService.toggle(context, false)
+    }
     if (
       permission.kind == PermissionKind.RUNTIME && permission.runtimePermissions.isNotEmpty()
     ) {

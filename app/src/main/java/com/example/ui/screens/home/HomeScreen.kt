@@ -51,6 +51,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
@@ -104,14 +105,13 @@ fun HomeScreen(
         Modifier
           .widthIn(max = 600.dp)
           .fillMaxSize()
-          .verticalScroll(rememberScrollState())
           .statusBarsPadding()
-          .padding(horizontal = 20.dp, vertical = 12.dp),
+          .padding(horizontal = 20.dp),
       horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-      // Top Bar
+      // Pinned Top Bar (never collides with status bar when scrolling)
       Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
       ) {
@@ -155,7 +155,16 @@ fun HomeScreen(
         }
       }
 
-      Spacer(modifier = Modifier.height(14.dp))
+      Column(
+        modifier =
+          Modifier
+            .fillMaxWidth()
+            .weight(1f)
+            .clipToBounds()
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally,
+      ) {
+        Spacer(modifier = Modifier.height(6.dp))
 
       // Interactive Animated Orb (Tap to Talk / Barge-in)
       RiyaOrb(
@@ -188,12 +197,24 @@ fun HomeScreen(
         verticalArrangement = Arrangement.spacedBy(8.dp),
       ) {
         FilledTonalButton(
-          onClick = viewModel::toggleBackgroundVoiceService,
+          onClick = {
+            if (!state.micGranted && !state.voiceState.isServiceRunning) {
+              onOpenPermissions()
+            } else {
+              viewModel.toggleBackgroundVoiceService()
+            }
+          },
           modifier = Modifier.testTag("toggle_background_voice_button"),
         ) {
           Icon(imageVector = Icons.Rounded.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
           Spacer(modifier = Modifier.width(6.dp))
-          Text(if (state.voiceState.isServiceRunning) "Stop Hey Riya" else "Start Hey Riya")
+          Text(
+            when {
+              state.voiceState.isServiceRunning -> "Stop Hey Riya"
+              !state.micGranted -> "Allow Mic"
+              else -> "Start Hey Riya"
+            }
+          )
         }
 
         FilledTonalButton(
@@ -427,6 +448,7 @@ fun HomeScreen(
       }
 
       Spacer(modifier = Modifier.height(18.dp))
+      }
     }
   }
 }

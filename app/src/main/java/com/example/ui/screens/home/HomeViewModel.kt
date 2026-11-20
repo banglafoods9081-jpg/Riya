@@ -64,7 +64,6 @@ constructor(
 ) : ViewModel() {
 
   private val textDraftFlow = MutableStateFlow("")
-  private val overlayToggleFlow = MutableStateFlow(false)
 
   private val baseFlow =
     combine(
@@ -92,7 +91,7 @@ constructor(
       toolExecutor.pendingConfirmation,
       riyaBrain.latestRagStatus,
       textDraftFlow,
-      overlayToggleFlow,
+      RiyaOverlayService.isShowing,
     ) { base, pending, rag, draft, overlayOn ->
       HomeUiState(
         settings = base.settings,
@@ -161,8 +160,7 @@ constructor(
 
   fun toggleOverlayBubble() {
     if (!uiState.value.overlayGranted) return
-    val next = !overlayToggleFlow.value
-    overlayToggleFlow.value = next
+    val next = !RiyaOverlayService.isShowing.value
     RiyaOverlayService.toggle(context, next)
   }
 

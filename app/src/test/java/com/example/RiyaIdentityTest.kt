@@ -42,4 +42,10 @@ class RiyaIdentityTest {
       RiyaIdentity.CREATOR_RESPONSE,
     )
   }
+
+  @Test
+  fun `primary gemini model uses gemini-3_8-flash`() {
+    assertEquals("gemini-3.8-flash", RiyaIdentity.PRIMARY_GEMINI_MODEL)
+    assertEquals("gemini-3.8-flash", RiyaIdentity.FALLBACK_GEMINI_MODELS.first())
+  }
 }

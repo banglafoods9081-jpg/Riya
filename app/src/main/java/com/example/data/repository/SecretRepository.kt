@@ -1,13 +1,19 @@
 package com.example.data.repository
 
+import com.example.core.config.RiyaIdentity
 import com.example.core.security.ApiKeyState
 import com.example.core.security.ApiKeyStore
 import com.example.di.IoDispatcher
+import com.example.domain.agent.RiyaBrain
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -52,37 +58,73 @@ constructor(
         )
       }
 
-      val request =
-        Request.Builder()
-          .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash")
-          .header("x-goog-api-key", trimmed)
-          .get()
-          .build()
+      val pingPayload =
+        JSONObject()
+          .put(
+            "contents",
+            JSONArray().put(
+              JSONObject().put("parts", JSONArray().put(JSONObject().put("text", "hi")))
+            ),
+          )
+          .put("generationConfig", JSONObject().put("maxOutputTokens", 2))
+          .toString()
+
+      val tried = linkedSetOf<String>()
+      val queue = ArrayDeque<String>()
+      RiyaIdentity.FALLBACK_GEMINI_MODELS.forEach { queue.add(it) }
 
       try {
-        okHttpClient.newCall(request).execute().use { response ->
-          when {
-            response.isSuccessful -> {
-              apiKeyStore.saveApiKey(trimmed, verified = true)
-              KeyVerificationResult.Valid
-            }
-            response.code == 400 || response.code == 401 || response.code == 403 -> {
-              KeyVerificationResult.Invalid(
-                "Gemini rejected this API key (HTTP ${response.code}). Please double-check the key in Google AI Studio."
-              )
-            }
-            response.code == 429 -> {
-              // Key is valid but rate-limited right now
-              apiKeyStore.saveApiKey(trimmed, verified = true)
-              KeyVerificationResult.Valid
-            }
-            else -> {
-              KeyVerificationResult.Invalid(
-                "Unexpected server response (HTTP ${response.code}). You can still save locally and retry later."
-              )
+        var lastCode = 0
+        var lastMessage: String? = null
+
+        while (queue.isNotEmpty()) {
+          val model = queue.removeFirst()
+          if (!tried.add(model)) continue
+
+          val request =
+            Request.Builder()
+              .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
+              .header("x-goog-api-key", trimmed)
+              .post(pingPayload.toRequestBody("application/json".toMediaType()))
+              .build()
+
+          okHttpClient.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            lastCode = response.code
+            lastMessage = RiyaBrain.extractGeminiErrorMessage(body)
+            when {
+              response.isSuccessful -> {
+                apiKeyStore.saveApiKey(trimmed, verified = true)
+                return@withContext KeyVerificationResult.Valid
+              }
+              response.code == 400 || response.code == 401 || response.code == 403 -> {
+                return@withContext KeyVerificationResult.Invalid(
+                  "Gemini rejected this API key (HTTP ${response.code}). Please double-check the key in Google AI Studio."
+                )
+              }
+              response.code == 429 -> {
+                // Key is valid but rate-limited right now
+                apiKeyStore.saveApiKey(trimmed, verified = true)
+                return@withContext KeyVerificationResult.Valid
+              }
+              response.code == 404 -> {
+                val suggested = RiyaBrain.extractSuggestedModel(body)
+                if (suggested != null && !tried.contains(suggested)) {
+                  queue.addFirst(suggested)
+                }
+              }
+              else -> {
+                return@withContext KeyVerificationResult.Invalid(
+                  "Unexpected server response (HTTP ${response.code}${lastMessage?.let { ": $it" }.orEmpty()}). You can still save locally and retry later."
+                )
+              }
             }
           }
         }
+
+        KeyVerificationResult.Invalid(
+          "Model check returned HTTP $lastCode${lastMessage?.let { ": $it" }.orEmpty()}. You can still save locally and retry later."
+        )
       } catch (e: Exception) {
         Timber.w(e, "Network error verifying Gemini API key")
         KeyVerificationResult.Invalid(

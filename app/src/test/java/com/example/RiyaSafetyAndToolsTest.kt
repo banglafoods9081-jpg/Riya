@@ -40,4 +40,25 @@ class RiyaSafetyAndToolsTest {
     assertTrue(json.contains("describe_screen"))
     assertTrue(json.contains("remember_fact"))
   }
+
+  @Test
+  fun `gemini 404 parser extracts suggested replacement model and clean error`() {
+    val body =
+      """
+      {
+        "error": {
+          "code": 404,
+          "message": "This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.8-flash for this task."
+        }
+      }
+      """.trimIndent()
+    org.junit.Assert.assertEquals(
+      "gemini-3.8-flash",
+      com.example.domain.agent.RiyaBrain.extractSuggestedModel(body),
+    )
+    org.junit.Assert.assertTrue(
+      com.example.domain.agent.RiyaBrain.extractGeminiErrorMessage(body)
+        ?.contains("models/gemini-3.8-flash") == true
+    )
+  }
 }

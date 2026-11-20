@@ -19,6 +19,9 @@ import android.widget.ImageView
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.example.R
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import timber.log.Timber
 import kotlin.math.abs
 
@@ -131,12 +134,14 @@ class RiyaOverlayService : Service() {
     runCatching {
       wm.addView(view, params)
       bubbleView = view
+      _isShowing.value = true
     }.onFailure { Timber.e(it, "Could not add overlay bubble") }
   }
 
   override fun onDestroy() {
     bubbleView?.let { runCatching { windowManager?.removeView(it) } }
     bubbleView = null
+    _isShowing.value = false
     super.onDestroy()
   }
 
@@ -146,6 +151,9 @@ class RiyaOverlayService : Service() {
     const val ACTION_SHOW = "com.example.action.SHOW_OVERLAY"
     const val ACTION_HIDE = "com.example.action.HIDE_OVERLAY"
 
+    private val _isShowing = MutableStateFlow(false)
+    val isShowing: StateFlow<Boolean> = _isShowing.asStateFlow()
+
     fun toggle(context: Context, show: Boolean) {
       val intent =
         Intent(context, RiyaOverlayService::class.java)
@@ -153,6 +161,7 @@ class RiyaOverlayService : Service() {
       if (show) {
         ContextCompat.startForegroundService(context, intent)
       } else {
+        _isShowing.value = false
         context.startService(intent)
       }
     }

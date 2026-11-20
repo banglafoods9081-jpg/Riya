@@ -11,6 +11,14 @@ data class PermanentMemoryFact(
 object RiyaIdentity {
   const val ASSISTANT_NAME = "Riya"
   const val CREATOR_NAME = "Rohan"
+  const val PRIMARY_GEMINI_MODEL = "gemini-3.8-flash"
+  val FALLBACK_GEMINI_MODELS =
+    listOf(
+      "gemini-3.8-flash",
+      "gemini-3-flash-preview",
+      "gemini-3.0-flash",
+      "gemini-2.5-flash",
+    )
   const val CREATOR_RESPONSE =
     "Amake baniyeche Rohan. Se Class 11-er student, ar Saddam sir-er student."
 
