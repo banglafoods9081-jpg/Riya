@@ -2,6 +2,7 @@
 <resources>
     <string name="app_name">Riya</string>
     <string name="app_tagline">Your Warm Voice Companion &amp; Phone Controller</string>
+    <string name="accessibility_service_description">Allows Riya to open apps, tap, type, scroll, control YouTube/media, and read screen content on your voice command. Banking, UPI, PIN, and OTP screens are strictly blocked.</string>
 
     <!-- Onboarding -->
     <string name="onboarding_greeting_title">Hii, ami Riya</string>

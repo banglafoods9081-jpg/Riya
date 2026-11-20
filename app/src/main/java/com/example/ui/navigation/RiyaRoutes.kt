@@ -11,5 +11,13 @@ sealed interface RiyaRoute {
 
   @Serializable data object Home : RiyaRoute
 
+  @Serializable data object Chat : RiyaRoute
+
+  @Serializable data object Memory : RiyaRoute
+
+  @Serializable data object Analysis : RiyaRoute
+
+  @Serializable data object Logs : RiyaRoute
+
   @Serializable data object Settings : RiyaRoute
 }

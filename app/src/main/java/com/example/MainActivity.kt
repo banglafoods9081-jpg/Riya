@@ -1,5 +1,6 @@
 package com.example
 
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -15,11 +16,13 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.example.data.repository.PreferencesRepository
+import com.example.service.RiyaVoiceService
 import com.example.ui.navigation.RiyaNavHost
 import com.example.ui.navigation.RiyaRoute
 import com.example.ui.theme.ObsidianNight
 import com.example.ui.theme.RiyaTheme
 import com.example.ui.theme.SakuraRose
+import com.example.widget.RiyaAppWidgetProvider
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
@@ -35,6 +38,7 @@ class MainActivity : ComponentActivity() {
       statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
       navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
     )
+    handleWidgetLaunch(intent)
 
     setContent {
       RiyaTheme {
@@ -56,6 +60,17 @@ class MainActivity : ComponentActivity() {
           RiyaNavHost(startDestination = resolvedStart)
         }
       }
+    }
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    handleWidgetLaunch(intent)
+  }
+
+  private fun handleWidgetLaunch(intent: Intent?) {
+    if (intent?.getBooleanExtra(RiyaAppWidgetProvider.EXTRA_START_TALK, false) == true) {
+      RiyaVoiceService.start(this, RiyaVoiceService.ACTION_TAP_TO_TALK)
     }
   }
 }

@@ -4,6 +4,9 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
+import androidx.room.Room
+import com.example.data.local.RiyaDao
+import com.example.data.local.RiyaDatabase
 import com.example.data.repository.PreferencesRepository
 import com.example.data.repository.PreferencesRepositoryImpl
 import com.example.data.repository.SecretRepository
@@ -36,6 +39,18 @@ annotation class DefaultDispatcher
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
+
+  @Provides
+  @Singleton
+  fun provideRiyaDatabase(@ApplicationContext context: Context): RiyaDatabase {
+    return Room.databaseBuilder(context, RiyaDatabase::class.java, "riya_memory.db")
+      .fallbackToDestructiveMigration(dropAllTables = true)
+      .build()
+  }
+
+  @Provides
+  @Singleton
+  fun provideRiyaDao(db: RiyaDatabase): RiyaDao = db.riyaDao()
 
   @Provides
   @Singleton

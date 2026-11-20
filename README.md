@@ -4,25 +4,45 @@ Built for **Rohan** (Class 11, Saddam sir's student, Durlovepur Eidgah More).
 
 ## Push to GitHub & Install APK on Your Phone
 
-### Option 1: Automatic APK Build via GitHub Actions (No PC Android Studio Needed)
-1. Push this entire project folder to a GitHub repository (`main` or `master` branch).
-2. Open your repository on GitHub -> tap the **Actions** tab.
-3. Open the latest **Build Riya APK** workflow run.
-4. Scroll to **Artifacts** and download **`Riya-Debug-APK`**.
-5. Unzip it on your phone and tap **`app-debug.apk`** to install!
+### Option 1: Automatic APK Build via GitHub Actions (No PC Required)
+1. Push this repository to GitHub (`main` or `master` branch).
+2. Open your GitHub repo -> **Actions** tab -> click the latest **Build Riya APK** run.
+3. Download **`Riya-Debug-APK`** under **Artifacts**.
+4. Unzip it on your Android phone and tap **`app-debug.apk`** to install.
 
 ### Option 2: Build Locally in Android Studio / CLI
 1. Open the project in Android Studio (Meerkat / Narwhal or newer with JDK 17+).
-2. If `debug.keystore` does not exist yet in the project root, generate it once:
+2. If `debug.keystore` does not exist yet in the root folder, generate it once:
    ```bash
    keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
    ```
-3. Run **Build -> Build Bundle(s) / APK(s) -> Build APK(s)** or run `gradle :app:assembleDebug`.
-4. Install `app/build/outputs/apk/debug/app-debug.apk` on your Android phone (Android 8.0+ / minSdk 26).
+3. Run `gradle :app:assembleDebug` (or **Build -> Build APK(s)**).
+4. Install `app/build/outputs/apk/debug/app-debug.apk` on your phone (Android 8.0+ / minSdk 26).
 
-## First-Time Setup on Your Phone
-1. Open **Riya** -> confirm your nickname (**Rohan**) and default language (**Banglish** / **Bengali**).
-2. Grant permissions step by step (Microphone, Notifications, Unrestricted Battery, etc.).
-3. On Android 13/14/15 sideloaded APKs, if Accessibility or Notification Access is greyed out:
-   - Tap **Open App Info** inside Riya's Permission screen -> tap the **3 dots** (top-right) -> **Allow restricted settings**.
-4. Paste your **Gemini API key** from [Google AI Studio](https://aistudio.google.com) on the **Connect Riya's Brain** screen and tap **Verify & Save Key** (stored locally via `EncryptedSharedPreferences`).
+---
+
+## First-Time Phone Setup (Important for Android 13/14/15)
+
+1. **Onboarding**: Confirm your name (**Rohan**) and default language (**Banglish** / **Bengali**).
+2. **Permissions**: Grant Microphone, Notifications, Unrestricted Battery, and optional permissions (Contacts, Phone, SMS, Usage Access, Overlay, Accessibility, Notification Access).
+3. **Allow Restricted Settings (for Sideloaded APK Accessibility & Notification Access)**:
+   - On Android 13/14/15, Accessibility and Notification Access are greyed out for sideloaded APKs until unlocked.
+   - Inside Riya's Permission screen, tap **Open App Info** (or open Phone Settings -> Apps -> Riya) -> tap the **3-dots menu** (top-right) -> **Allow restricted settings** -> return to Accessibility and turn **Riya** ON.
+4. **Gemini API Key**:
+   - Visit [Google AI Studio](https://aistudio.google.com) -> **Get API key**.
+   - Paste it in Riya's **Connect Riya's Brain** screen -> tap **Verify & Save Key** (encrypted locally in `EncryptedSharedPreferences`).
+
+---
+
+## Battery Optimization Steps (Prevent Background Voice Service Kill)
+- **Xiaomi / Redmi / POCO (MIUI / HyperOS)**: App Info -> Battery saver -> **No restrictions** + enable **Autostart** + lock Riya in Recents.
+- **Oppo / Realme (ColorOS / Realme UI)**: App Info -> Battery usage -> enable **Allow background activity** + **Allow foreground activity** + Autostart.
+- **Vivo / iQOO (Funtouch OS)**: App Info -> Battery -> **Unrestricted** + Background Power Consumption -> **Allow high background power usage**.
+- **Samsung (One UI)**: App Info -> Battery -> **Unrestricted**.
+
+---
+
+## Honest Android Limitations & Troubleshooting
+- **Always-on Wake Word**: Android blocks third-party apps from exclusive hardware DSP hotword access when another app holds the microphone (e.g., phone calls or voice recorders). Riya runs a foreground `SpeechRecognizer` loop when active, plus **Tap-to-Talk Orb**, **Floating Overlay Bubble**, **Home Widget**, and **Quick Settings Tile**.
+- **Protected / DRM Screens**: Some banking, UPI, password, and DRM video apps block Accessibility reading or screenshots (`FLAG_SECURE`). Riya also intentionally refuses banking/UPI/PIN/OTP automation for your safety.
+- **Voice Not Responding**: Ensure Google Speech Services (`Google` app) is enabled on your phone and Microphone permission is granted. You can always type commands directly in the Home or Chat input bar.
