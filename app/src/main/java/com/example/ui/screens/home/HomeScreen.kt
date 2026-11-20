@@ -394,7 +394,7 @@ fun HomeScreen(
             val sub =
               when (val k = state.apiKeyState) {
                 is ApiKeyState.Saved -> if (k.isVerified) "Verified • ${k.maskedKey}" else "Saved • ${k.maskedKey}"
-                is ApiKeyState.Missing -> "Tap to verify Gemini API key"
+                is ApiKeyState.Missing -> "Tap to verify Grok API key"
                 is ApiKeyState.StorageError -> k.message
               }
             Text(sub, style = MaterialTheme.typography.bodyMedium, color = TextSecondary)

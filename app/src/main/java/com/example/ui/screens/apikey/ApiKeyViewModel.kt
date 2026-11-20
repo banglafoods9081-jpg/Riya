@@ -108,7 +108,7 @@ constructor(
     val candidate = _uiState.value.inputKey.trim()
     if (candidate.isEmpty()) {
       _uiState.update {
-        it.copy(actionStatus = ApiKeyActionStatus.Error("Please enter your Gemini API key first."))
+        it.copy(actionStatus = ApiKeyActionStatus.Error("Please enter your Grok (or Groq) API key first."))
       }
       return
     }
@@ -119,12 +119,14 @@ constructor(
           if (isOnboardingFlow) {
             preferencesRepository.setOnboardingCompleted(true)
           }
+          val isGroq = candidate.startsWith("gsk_", ignoreCase = true)
           _uiState.update {
             it.copy(
               inputKey = "",
               actionStatus =
                 ApiKeyActionStatus.VerifiedSuccess(
-                  "Verified! Riya's Gemini 3.8 Flash brain is ready."
+                  if (isGroq) "Verified! Riya's fast Groq brain is ready."
+                  else "Verified! Riya's Grok AI brain is ready."
                 ),
             )
           }

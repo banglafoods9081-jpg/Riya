@@ -44,8 +44,9 @@ class RiyaIdentityTest {
   }
 
   @Test
-  fun `primary gemini model uses gemini-3_8-flash`() {
-    assertEquals("gemini-3.8-flash", RiyaIdentity.PRIMARY_GEMINI_MODEL)
-    assertEquals("gemini-3.8-flash", RiyaIdentity.FALLBACK_GEMINI_MODELS.first())
+  fun `primary grok model and fallback lists are configured`() {
+    assertEquals("grok-4.20", RiyaIdentity.PRIMARY_GROK_MODEL)
+    assertEquals("grok-4.20", RiyaIdentity.FALLBACK_GROK_MODELS.first())
+    assertTrue(RiyaIdentity.FALLBACK_GROQ_MODELS.contains("llama-3.3-70b-versatile"))
   }
 }

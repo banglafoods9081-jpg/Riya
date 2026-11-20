@@ -1,7 +1,9 @@
 package com.example
 
 import com.example.core.safety.SafetyGuard
-import com.example.data.remote.GeminiToolDeclarations
+import com.example.data.remote.GrokToolDeclarations
+import com.example.domain.agent.RiyaBrain
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -30,8 +32,11 @@ class RiyaSafetyAndToolsTest {
   }
 
   @Test
-  fun `gemini tool declarations include core phone control tools`() {
-    val json = GeminiToolDeclarations.buildToolsJsonArray().toString()
+  fun `grok tool declarations use openai function schema and stay within 20 tools`() {
+    val array = GrokToolDeclarations.buildToolsJsonArray()
+    assertEquals(20, array.length())
+    val json = array.toString()
+    assertTrue(json.contains("\"type\":\"function\""))
     assertTrue(json.contains("open_app"))
     assertTrue(json.contains("play_youtube"))
     assertTrue(json.contains("call_contact"))
@@ -42,23 +47,21 @@ class RiyaSafetyAndToolsTest {
   }
 
   @Test
-  fun `gemini 404 parser extracts suggested replacement model and clean error`() {
-    val body =
-      """
-      {
-        "error": {
-          "code": 404,
-          "message": "This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.8-flash for this task."
-        }
-      }
-      """.trimIndent()
-    org.junit.Assert.assertEquals(
-      "gemini-3.8-flash",
-      com.example.domain.agent.RiyaBrain.extractSuggestedModel(body),
-    )
-    org.junit.Assert.assertTrue(
-      com.example.domain.agent.RiyaBrain.extractGeminiErrorMessage(body)
-        ?.contains("models/gemini-3.8-flash") == true
-    )
+  fun `provider config and live model parser route xai grok and groq keys cleanly`() {
+    val grok = RiyaBrain.resolveProviderConfig("xai-example-secret-key-1234567890")
+    assertFalse(grok.isGroq)
+    assertEquals("https://api.x.ai/v1", grok.baseUrl)
+
+    val groq = RiyaBrain.resolveProviderConfig("gsk_example_secret_key_1234567890")
+    assertTrue(groq.isGroq)
+    assertEquals("https://api.groq.com/openai/v1", groq.baseUrl)
+
+    val modelsJson =
+      """{"data":[{"id":"grok-imagine-image"},{"id":"grok-4.7"},{"id":"grok-4.20"}]}"""
+    val parsed = RiyaBrain.parsePreferredChatModels(modelsJson, isGroq = false)
+    assertEquals(listOf("grok-4.20", "grok-4.7"), parsed)
+
+    val errJson = """{"error":{"message":"Incorrect API key provided","type":"invalid_request_error"}}"""
+    assertEquals("Incorrect API key provided", RiyaBrain.extractGrokErrorMessage(errJson))
   }
 }

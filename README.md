@@ -28,9 +28,9 @@ Built for **Rohan** (Class 11, Saddam sir's student, Durlovepur Eidgah More).
 3. **Allow Restricted Settings (for Sideloaded APK Accessibility & Notification Access)**:
    - On Android 13/14/15, Accessibility and Notification Access are greyed out for sideloaded APKs until unlocked.
    - Inside Riya's Permission screen, tap **Open App Info** (or open Phone Settings -> Apps -> Riya) -> tap the **3-dots menu** (top-right) -> **Allow restricted settings** -> return to Accessibility and turn **Riya** ON.
-4. **Gemini API Key & Optional ElevenLabs Cute Voice**:
-   - Visit [Google AI Studio](https://aistudio.google.com) -> **Get API key**.
-   - Paste it in Riya's **Connect Riya's Brain** screen -> tap **Verify & Save Key** (encrypted locally in `EncryptedSharedPreferences`).
+4. **Grok API Key (or Free Groq) & Optional ElevenLabs Cute Voice**:
+   - Visit [xAI Console](https://console.x.ai) to create a Grok key (`xai-...`), or [Groq Console](https://console.groq.com) for a free high-limit key (`gsk_...`).
+   - Paste either key in Riya's **Connect Riya's Brain** screen -> tap **Verify & Save Key** (auto-detected and encrypted locally in `EncryptedSharedPreferences`).
    - *(Optional for ultra-sweet cute girl voice)*: Paste your **ElevenLabs API Key** on the same screen, choose a preset (`Bella`, `Rachel`, `Elli`, or `Aria`), and tap **Test Voice**. Without an ElevenLabs key, Riya uses Android's built-in female voice automatically.
 
 ---

@@ -281,7 +281,7 @@ fun ApiKeyScreen(
               color = MaterialTheme.colorScheme.onPrimary,
             )
             Spacer(modifier = Modifier.width(10.dp))
-            Text("Verifying with Gemini...")
+            Text("Verifying with Grok...")
           } else {
             Text(
               text = stringResource(R.string.api_key_verify_save),

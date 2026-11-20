@@ -58,8 +58,8 @@ class ApiKeyStore @Inject constructor(@ApplicationContext private val context: C
   fun refreshState() {
     prefsResult.fold(
       onSuccess = { prefs ->
-        val raw = prefs.getString(KEY_GEMINI_API, null)?.trim().orEmpty()
-        val verified = prefs.getBoolean(KEY_GEMINI_VERIFIED, false)
+        val raw = prefs.getString(KEY_GROK_API, null)?.trim().orEmpty()
+        val verified = prefs.getBoolean(KEY_GROK_VERIFIED, false)
         _apiKeyState.value =
           if (raw.isEmpty()) {
             ApiKeyState.Missing
@@ -90,7 +90,7 @@ class ApiKeyStore @Inject constructor(@ApplicationContext private val context: C
   }
 
   fun getApiKey(): String? {
-    return prefsResult.getOrNull()?.getString(KEY_GEMINI_API, null)?.trim()?.takeIf { it.isNotEmpty() }
+    return prefsResult.getOrNull()?.getString(KEY_GROK_API, null)?.trim()?.takeIf { it.isNotEmpty() }
   }
 
   fun saveApiKey(key: String, verified: Boolean): Result<Unit> {
@@ -100,8 +100,8 @@ class ApiKeyStore @Inject constructor(@ApplicationContext private val context: C
     }
     return prefsResult.mapCatching { prefs ->
       prefs.edit()
-        .putString(KEY_GEMINI_API, sanitized)
-        .putBoolean(KEY_GEMINI_VERIFIED, verified)
+        .putString(KEY_GROK_API, sanitized)
+        .putBoolean(KEY_GROK_VERIFIED, verified)
         .apply()
       _apiKeyState.value = ApiKeyState.Saved(maskedKey = maskKey(sanitized), isVerified = verified)
     }
@@ -110,8 +110,8 @@ class ApiKeyStore @Inject constructor(@ApplicationContext private val context: C
   fun clearApiKey(): Result<Unit> {
     return prefsResult.mapCatching { prefs ->
       prefs.edit()
-        .remove(KEY_GEMINI_API)
-        .remove(KEY_GEMINI_VERIFIED)
+        .remove(KEY_GROK_API)
+        .remove(KEY_GROK_VERIFIED)
         .apply()
       _apiKeyState.value = ApiKeyState.Missing
     }
@@ -162,8 +162,8 @@ class ApiKeyStore @Inject constructor(@ApplicationContext private val context: C
 
   companion object {
     private const val PREFS_FILE_NAME = "riya_encrypted_secrets"
-    private const val KEY_GEMINI_API = "gemini_api_key"
-    private const val KEY_GEMINI_VERIFIED = "gemini_api_verified"
+    private const val KEY_GROK_API = "grok_api_key"
+    private const val KEY_GROK_VERIFIED = "grok_api_verified"
     private const val KEY_ELEVENLABS_API = "elevenlabs_api_key"
     private const val KEY_ELEVENLABS_VERIFIED = "elevenlabs_api_verified"
     private const val KEY_ELEVENLABS_VOICE_ID = "elevenlabs_voice_id"

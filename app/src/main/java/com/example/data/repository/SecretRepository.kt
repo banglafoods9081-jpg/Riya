@@ -86,28 +86,49 @@ constructor(
   override suspend fun verifyAndSaveApiKey(apiKey: String): KeyVerificationResult =
     withContext(ioDispatcher) {
       val trimmed = apiKey.trim()
+      if (trimmed.startsWith("AIza", ignoreCase = true)) {
+        return@withContext KeyVerificationResult.Invalid(
+          "Eta purono Gemini key! Ekhon Grok API key (xai-... from console.x.ai, ba Groq gsk_...) paste koro."
+        )
+      }
       if (trimmed.length < 20) {
         return@withContext KeyVerificationResult.Invalid(
-          "This key looks too short. Please paste your full Gemini API key from Google AI Studio."
+          "This key looks too short. Please paste your full Grok API key (xai-...) or Groq key (gsk_...)."
         )
       }
 
-      val pingPayload =
-        JSONObject()
-          .put(
-            "contents",
-            JSONArray().put(
-              JSONObject().put("parts", JSONArray().put(JSONObject().put("text", "hi")))
-            ),
-          )
-          .put("generationConfig", JSONObject().put("maxOutputTokens", 2))
-          .toString()
-
-      val tried = linkedSetOf<String>()
-      val queue = ArrayDeque<String>()
-      RiyaIdentity.FALLBACK_GEMINI_MODELS.forEach { queue.add(it) }
+      val provider = RiyaBrain.resolveProviderConfig(trimmed)
 
       try {
+        // 1. Check /models first (0 tokens) to validate key and discover active account models
+        val modelsReq =
+          Request.Builder()
+            .url("${provider.baseUrl}/models")
+            .header("Authorization", "Bearer $trimmed")
+            .get()
+            .build()
+
+        val discovered = mutableListOf<String>()
+        okHttpClient.newCall(modelsReq).execute().use { resp ->
+          val body = resp.body?.string().orEmpty()
+          when {
+            resp.isSuccessful -> {
+              discovered.addAll(RiyaBrain.parsePreferredChatModels(body, provider.isGroq))
+            }
+            resp.code == 401 || resp.code == 403 -> {
+              val msg = RiyaBrain.extractGrokErrorMessage(body)
+              return@withContext KeyVerificationResult.Invalid(
+                "${provider.label} rejected this API key (HTTP ${resp.code}${msg?.let { ": $it" }.orEmpty()})."
+              )
+            }
+          }
+        }
+
+        val queue = ArrayDeque<String>()
+        discovered.forEach { queue.add(it) }
+        provider.fallbackModels.forEach { if (!queue.contains(it)) queue.add(it) }
+
+        val tried = linkedSetOf<String>()
         var lastCode = 0
         var lastMessage: String? = null
 
@@ -115,41 +136,53 @@ constructor(
           val model = queue.removeFirst()
           if (!tried.add(model)) continue
 
+          val pingPayload =
+            JSONObject()
+              .put("model", model)
+              .put(
+                "messages",
+                JSONArray().put(JSONObject().put("role", "user").put("content", "hi")),
+              )
+              .put("max_tokens", 2)
+              .toString()
+
           val request =
             Request.Builder()
-              .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
-              .header("x-goog-api-key", trimmed)
+              .url("${provider.baseUrl}/chat/completions")
+              .header("Authorization", "Bearer $trimmed")
               .post(pingPayload.toRequestBody("application/json".toMediaType()))
               .build()
 
           okHttpClient.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
             lastCode = response.code
-            lastMessage = RiyaBrain.extractGeminiErrorMessage(body)
+            lastMessage = RiyaBrain.extractGrokErrorMessage(body)
             when {
               response.isSuccessful -> {
                 apiKeyStore.saveApiKey(trimmed, verified = true)
                 return@withContext KeyVerificationResult.Valid
               }
-              response.code == 400 || response.code == 401 || response.code == 403 -> {
+              response.code == 401 || response.code == 403 -> {
                 return@withContext KeyVerificationResult.Invalid(
-                  "Gemini rejected this API key (HTTP ${response.code}). Please double-check the key in Google AI Studio."
+                  "${provider.label} rejected this API key (HTTP ${response.code}${lastMessage?.let { ": $it" }.orEmpty()})."
+                )
+              }
+              response.code == 402 -> {
+                return@withContext KeyVerificationResult.Invalid(
+                  "${provider.label} key active, but account needs credits (HTTP 402${lastMessage?.let { ": $it" }.orEmpty()})."
                 )
               }
               response.code == 429 -> {
-                // Key is valid but rate-limited right now
                 apiKeyStore.saveApiKey(trimmed, verified = true)
                 return@withContext KeyVerificationResult.Valid
               }
-              response.code == 404 -> {
-                val suggested = RiyaBrain.extractSuggestedModel(body)
-                if (suggested != null && !tried.contains(suggested)) {
-                  queue.addFirst(suggested)
-                }
+              response.code == 404 ||
+                (response.code == 400 && body.contains("model", ignoreCase = true)) -> {
+                // Try next discovered/fallback model
               }
               else -> {
                 return@withContext KeyVerificationResult.Invalid(
-                  "Unexpected server response (HTTP ${response.code}${lastMessage?.let { ": $it" }.orEmpty()}). You can still save locally and retry later."
+                  "Unexpected ${provider.label} response (HTTP ${response.code}${lastMessage?.let { ": $it" }.orEmpty()}). You can still save locally and retry."
                 )
               }
             }
@@ -157,12 +190,12 @@ constructor(
         }
 
         KeyVerificationResult.Invalid(
-          "Model check returned HTTP $lastCode${lastMessage?.let { ": $it" }.orEmpty()}. You can still save locally and retry later."
+          "${provider.label} check returned HTTP $lastCode${lastMessage?.let { ": $it" }.orEmpty()}. You can still save locally and retry."
         )
       } catch (e: Exception) {
-        Timber.w(e, "Network error verifying Gemini API key")
+        Timber.w(e, "Network error verifying ${provider.label} API key")
         KeyVerificationResult.Invalid(
-          "Could not reach Gemini servers (${e.localizedMessage ?: "network error"}). Check internet or use Save Locally."
+          "Could not reach ${provider.label} servers (${e.localizedMessage ?: "network error"}). Check internet or use Save Locally."
         )
       }
     }

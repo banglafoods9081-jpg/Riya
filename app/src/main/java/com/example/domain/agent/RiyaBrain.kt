@@ -5,7 +5,7 @@ import com.example.analysis.RagStatus
 import com.example.control.RiyaToolExecutor
 import com.example.core.config.RiyaIdentity
 import com.example.core.safety.SafetyGuard
-import com.example.data.remote.GeminiToolDeclarations
+import com.example.data.remote.GrokToolDeclarations
 import com.example.data.repository.MemoryRepository
 import com.example.data.repository.PreferencesRepository
 import com.example.data.repository.SecretRepository
@@ -54,7 +54,8 @@ constructor(
   private val _latestRagStatus = MutableStateFlow<RagStatus?>(null)
   val latestRagStatus: StateFlow<RagStatus?> = _latestRagStatus.asStateFlow()
 
-  @Volatile private var activeModel: String = RiyaIdentity.PRIMARY_GEMINI_MODEL
+  @Volatile private var activeGrokModel: String = RiyaIdentity.PRIMARY_GROK_MODEL
+  @Volatile private var activeGroqModel: String = RiyaIdentity.FALLBACK_GROQ_MODELS.first()
 
   suspend fun processUserMessage(userText: String): RiyaReply =
     withContext(ioDispatcher) {
@@ -116,7 +117,7 @@ constructor(
       val apiKey = secretRepository.getStoredApiKey()
       if (apiKey.isNullOrBlank()) {
         val reply =
-          "Jaan, amar Gemini API key ekhono dewa hoyni. Settings -> API Key screen-e giye key ta dao, tahole ami tomar sathe mon khule kotha bolte parbo!"
+          "Jaan, amar Grok API key ekhono dewa hoyni. Settings -> API Key screen-e giye key ta dao, tahole ami tomar sathe mon khule kotha bolte parbo!"
         memoryRepository.addMessage(role = "riya", text = reply, mood = "caring")
         return@withContext RiyaReply(reply, mood = "caring", ragStatus = rag)
       }
@@ -150,22 +151,23 @@ constructor(
             appendLine("\nWhen executing a phone control tool, respond warmly in Bengali/Banglish/Hindi/English matching the user, confirming what happened honestly.")
           }
 
-        val contents = JSONArray()
+        val messages = JSONArray()
+        messages.put(JSONObject().put("role", "system").put("content", systemPrompt))
         recentHistory.dropLast(1).forEach { msg ->
-          val geminiRole = if (msg.role == "user") "user" else "model"
-          contents.put(
+          val role = if (msg.role == "user") "user" else "assistant"
+          messages.put(
             JSONObject()
-              .put("role", geminiRole)
-              .put("parts", JSONArray().put(JSONObject().put("text", msg.text)))
+              .put("role", role)
+              .put("content", msg.text)
           )
         }
-        contents.put(
+        messages.put(
           JSONObject()
             .put("role", "user")
-            .put("parts", JSONArray().put(JSONObject().put("text", trimmed)))
+            .put("content", trimmed)
         )
 
-        val replyText = runGeminiToolLoop(apiKey, systemPrompt, contents)
+        val replyText = runGrokToolLoop(apiKey, messages)
         val mood =
           when {
             rag?.shouldShowRag == true -> "playful_rag"
@@ -175,7 +177,7 @@ constructor(
         memoryRepository.addMessage(role = "riya", text = replyText, mood = mood)
         RiyaReply(text = replyText, mood = mood, ragStatus = rag)
       } catch (e: Exception) {
-        Timber.e(e, "GeminiBrain error")
+        Timber.e(e, "GrokBrain error")
         val fallbackMsg =
           "Shona, ektu network/API problem hocche (${e.localizedMessage ?: "error"}). Tobe ami pashei achi!"
         memoryRepository.addMessage(role = "riya", text = fallbackMsg, mood = "caring")
@@ -185,103 +187,80 @@ constructor(
       }
     }
 
-  private suspend fun runGeminiToolLoop(
+  private suspend fun runGrokToolLoop(
     apiKey: String,
-    systemPrompt: String,
-    contents: JSONArray,
+    messages: JSONArray,
   ): String {
-    val tools = GeminiToolDeclarations.buildToolsJsonArray()
+    val tools = GrokToolDeclarations.buildToolsJsonArray()
+    val provider = resolveProviderConfig(apiKey)
+
     repeat(6) {
-      val generationConfig =
-        JSONObject()
-          .put("temperature", 0.72)
-          .put("maxOutputTokens", 300)
-          .put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
+      val responseJson =
+        executeChatCompletionsWithFallback(
+          apiKey = apiKey,
+          provider = provider,
+          messages = messages,
+          tools = tools,
+        )
 
-      val payload =
-        JSONObject()
-          .put(
-            "systemInstruction",
-            JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemPrompt))),
-          )
-          .put("contents", contents)
-          .put("tools", tools)
-          .put("generationConfig", generationConfig)
+      val choices = responseJson.optJSONArray("choices")
+      val firstChoice = choices?.optJSONObject(0)
+      val assistantMsg = firstChoice?.optJSONObject("message")
+        ?: return "Hoye gese jaan!"
 
-      val responseJson = executeGenerateContentWithModelFallback(apiKey, payload)
+      messages.put(assistantMsg)
 
-      val candidates = responseJson.optJSONArray("candidates")
-      val firstCandidate = candidates?.optJSONObject(0)
-      val content = firstCandidate?.optJSONObject("content")
-      val parts = content?.optJSONArray("parts") ?: JSONArray()
-
-      // Append model turn to contents
-      if (content != null) {
-        contents.put(content)
+      val toolCalls = assistantMsg.optJSONArray("tool_calls")
+      if (toolCalls == null || toolCalls.length() == 0) {
+        val text = assistantMsg.optString("content", "").trim()
+        return text.ifEmpty { "Hoye gese jaan!" }
       }
 
-      val functionCalls = mutableListOf<Pair<String, JSONObject>>()
-      val textParts = mutableListOf<String>()
-
-      for (i in 0 until parts.length()) {
-        val part = parts.optJSONObject(i) ?: continue
-        if (part.has("functionCall")) {
-          val fc = part.getJSONObject("functionCall")
-          functionCalls.add(fc.getString("name") to (fc.optJSONObject("args") ?: JSONObject()))
-        } else if (part.has("text")) {
-          textParts.add(part.getString("text"))
-        }
-      }
-
-      if (functionCalls.isEmpty()) {
-        return textParts.joinToString("\n").trim().ifEmpty { "Hoye gese jaan!" }
-      }
-
-      val responseParts = JSONArray()
       var capturedScreenshot: String? = null
+      for (i in 0 until toolCalls.length()) {
+        val tc = toolCalls.optJSONObject(i) ?: continue
+        val callId = tc.optString("id", "call_$i")
+        val fnObj = tc.optJSONObject("function") ?: continue
+        val fnName = fnObj.optString("name")
+        val rawArgs = fnObj.optString("arguments", "{}")
+        val fnArgs = runCatching { JSONObject(rawArgs) }.getOrElse { JSONObject() }
 
-      for ((fnName, fnArgs) in functionCalls) {
         val result = toolExecutor.executeTool(fnName, fnArgs)
         if (result.screenshotBase64 != null) {
           capturedScreenshot = result.screenshotBase64
         }
-        responseParts.put(
+        val toolContent =
           JSONObject()
-            .put(
-              "functionResponse",
-              JSONObject()
-                .put("name", fnName)
-                .put(
-                  "response",
-                  JSONObject()
-                    .put("ok", result.ok)
-                    .put("result", result.message),
-                ),
-            )
+            .put("ok", result.ok)
+            .put("result", result.message)
+            .toString()
+
+        messages.put(
+          JSONObject()
+            .put("role", "tool")
+            .put("tool_call_id", callId)
+            .put("content", toolContent)
         )
       }
 
-      contents.put(
-        JSONObject()
-          .put("role", "user")
-          .put("parts", responseParts)
-      )
-
-      if (capturedScreenshot != null) {
-        contents.put(
+      if (capturedScreenshot != null && !provider.isGroq) {
+        messages.put(
           JSONObject()
             .put("role", "user")
             .put(
-              "parts",
+              "content",
               JSONArray()
-                .put(JSONObject().put("text", "Here is the current screen image. Describe it warmly and concisely."))
                 .put(
                   JSONObject()
+                    .put("type", "text")
+                    .put("text", "Here is the current screen image. Describe it warmly and concisely.")
+                )
+                .put(
+                  JSONObject()
+                    .put("type", "image_url")
                     .put(
-                      "inlineData",
-                      JSONObject()
-                        .put("mimeType", "image/jpeg")
-                        .put("data", capturedScreenshot),
+                      "image_url",
+                      JSONObject().put("url", "data:image/jpeg;base64,$capturedScreenshot")
                     )
                 ),
             )
@@ -292,61 +271,74 @@ constructor(
     return "Kaj ta shesh korlam jaan!"
   }
 
-  private fun executeGenerateContentWithModelFallback(
+  private fun executeChatCompletionsWithFallback(
     apiKey: String,
-    payload: JSONObject,
+    provider: ProviderConfig,
+    messages: JSONArray,
+    tools: JSONArray,
   ): JSONObject {
     val tried = linkedSetOf<String>()
     val queue = ArrayDeque<String>()
-    queue.add(activeModel)
-    RiyaIdentity.FALLBACK_GEMINI_MODELS.forEach { if (it != activeModel) queue.add(it) }
+    val preferredActive = if (provider.isGroq) activeGroqModel else activeGrokModel
+    queue.add(preferredActive)
+    provider.fallbackModels.forEach { if (it != preferredActive) queue.add(it) }
 
+    var discoveredModels = false
     var lastError: String? = null
+
     while (queue.isNotEmpty()) {
       val model = queue.removeFirst()
       if (!tried.add(model)) continue
 
-      val requestPayload =
-        if (tried.size == 0) payload else payload
+      val payload =
+        JSONObject()
+          .put("model", model)
+          .put("messages", messages)
+          .put("tools", tools)
+          .put("tool_choice", "auto")
+          .put("temperature", 0.72)
+          .put("max_tokens", 350)
+          .toString()
 
       val request =
         Request.Builder()
-          .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
-          .header("x-goog-api-key", apiKey)
-          .post(requestPayload.toString().toRequestBody("application/json".toMediaType()))
+          .url("${provider.baseUrl}/chat/completions")
+          .header("Authorization", "Bearer $apiKey")
+          .post(payload.toRequestBody("application/json".toMediaType()))
           .build()
 
       okHttpClient.newCall(request).execute().use { resp ->
         val body = resp.body?.string().orEmpty()
         if (resp.isSuccessful) {
-          activeModel = model
+          if (provider.isGroq) activeGroqModel = model else activeGrokModel = model
           return JSONObject(body)
         }
-        val cleanMsg = extractGeminiErrorMessage(body) ?: "HTTP ${resp.code}"
-        lastError = "HTTP ${resp.code}: $cleanMsg"
+        val cleanMsg = extractGrokErrorMessage(body) ?: "HTTP ${resp.code}"
+        lastError = "${provider.label} HTTP ${resp.code}: $cleanMsg"
 
-        // If a model doesn't accept thinkingConfig, strip it once and retry the same model
-        if (resp.code == 400 && body.contains("thinkingConfig", ignoreCase = true)) {
-          val gen = payload.optJSONObject("generationConfig")
-          if (gen != null && gen.has("thinkingConfig")) {
-            gen.remove("thinkingConfig")
-            tried.remove(model)
-            queue.addFirst(model)
-            continue
-          }
-        }
+        val isModelError =
+          resp.code == 404 ||
+            (resp.code == 400 &&
+              (body.contains("model", ignoreCase = true) ||
+                body.contains("does not exist", ignoreCase = true) ||
+                body.contains("deprecated", ignoreCase = true)))
 
-        if (resp.code == 404) {
-          val suggested = extractSuggestedModel(body)
-          if (suggested != null && !tried.contains(suggested)) {
-            queue.addFirst(suggested)
+        if (isModelError) {
+          if (!discoveredModels) {
+            discoveredModels = true
+            val liveModels = discoverLiveModels(okHttpClient, apiKey, provider)
+            liveModels.forEach { candidate ->
+              if (!tried.contains(candidate) && !queue.contains(candidate)) {
+                queue.addFirst(candidate)
+              }
+            }
           }
         } else {
           throw IllegalStateException(lastError)
         }
       }
     }
-    throw IllegalStateException(lastError ?: "No compatible Gemini model available")
+    throw IllegalStateException(lastError ?: "No compatible ${provider.label} model available")
   }
 
   private suspend fun tryFastLocalCommand(
@@ -355,7 +347,7 @@ constructor(
     rag: RagStatus?,
   ): String? {
     val lower = input.trim().lowercase()
-    // Let multi-step commands go to Gemini tool loop
+    // Let multi-step commands go to Grok tool loop
     val looksMultiStep =
       listOf(" then ", " tarpor ", " kore ", " pore ", " ar volume", " & ").any { lower.contains(it) }
     if (looksMultiStep) return null
@@ -496,16 +488,81 @@ constructor(
     return null
   }
 
-  companion object {
-    private val SUGGESTED_MODEL_REGEX = Regex("""use\s+models/([a-zA-Z0-9._-]+)""", RegexOption.IGNORE_CASE)
+  data class ProviderConfig(
+    val label: String,
+    val baseUrl: String,
+    val isGroq: Boolean,
+    val fallbackModels: List<String>,
+  )
 
-    internal fun extractSuggestedModel(errorBody: String): String? {
-      return SUGGESTED_MODEL_REGEX.find(errorBody)?.groupValues?.getOrNull(1)
+  companion object {
+    internal fun resolveProviderConfig(apiKey: String): ProviderConfig {
+      val trimmed = apiKey.trim()
+      return if (trimmed.startsWith("gsk_", ignoreCase = true)) {
+        ProviderConfig(
+          label = "Groq",
+          baseUrl = "https://api.groq.com/openai/v1",
+          isGroq = true,
+          fallbackModels = RiyaIdentity.FALLBACK_GROQ_MODELS,
+        )
+      } else {
+        ProviderConfig(
+          label = "Grok (xAI)",
+          baseUrl = "https://api.x.ai/v1",
+          isGroq = false,
+          fallbackModels = RiyaIdentity.FALLBACK_GROK_MODELS,
+        )
+      }
     }
 
-    internal fun extractGeminiErrorMessage(errorBody: String): String? {
+    internal fun discoverLiveModels(
+      client: OkHttpClient,
+      apiKey: String,
+      provider: ProviderConfig,
+    ): List<String> {
       return runCatching {
-        JSONObject(errorBody).optJSONObject("error")?.optString("message")?.takeIf { it.isNotBlank() }
+        val req =
+          Request.Builder()
+            .url("${provider.baseUrl}/models")
+            .header("Authorization", "Bearer $apiKey")
+            .get()
+            .build()
+        client.newCall(req).execute().use { resp ->
+          if (!resp.isSuccessful) return emptyList()
+          val body = resp.body?.string().orEmpty()
+          parsePreferredChatModels(body, provider.isGroq)
+        }
+      }.getOrDefault(emptyList())
+    }
+
+    internal fun parsePreferredChatModels(modelsJsonBody: String, isGroq: Boolean): List<String> {
+      val data = runCatching { JSONObject(modelsJsonBody).optJSONArray("data") }.getOrNull() ?: return emptyList()
+      val blockedKeywords = listOf("image", "video", "imagine", "tts", "whisper", "audio", "guard", "embed", "moderation")
+      val ids = mutableListOf<String>()
+      for (i in 0 until data.length()) {
+        val id = data.optJSONObject(i)?.optString("id")?.trim().orEmpty()
+        if (id.isNotEmpty() && blockedKeywords.none { id.contains(it, ignoreCase = true) }) {
+          ids.add(id)
+        }
+      }
+      val preferredOrder =
+        if (isGroq) listOf("llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen", "llama")
+        else listOf("grok-4.20", "grok-4.3", "grok-4.6", "grok-4.7", "grok-4", "grok-3-mini", "grok-3-fast", "grok-3", "grok")
+
+      return ids.sortedBy { id ->
+        val idx = preferredOrder.indexOfFirst { id.contains(it, ignoreCase = true) }
+        if (idx >= 0) idx else preferredOrder.size
+      }
+    }
+
+    internal fun extractGrokErrorMessage(errorBody: String): String? {
+      return runCatching {
+        val json = JSONObject(errorBody)
+        when (val err = json.opt("error")) {
+          is JSONObject -> err.optString("message").takeIf { it.isNotBlank() }
+          is String -> err.takeIf { it.isNotBlank() }
+          else -> json.optString("message").takeIf { it.isNotBlank() }
+        }
       }.getOrNull()
     }
   }

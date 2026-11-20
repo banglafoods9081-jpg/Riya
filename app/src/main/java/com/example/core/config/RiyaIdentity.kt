@@ -11,13 +11,21 @@ data class PermanentMemoryFact(
 object RiyaIdentity {
   const val ASSISTANT_NAME = "Riya"
   const val CREATOR_NAME = "Rohan"
-  const val PRIMARY_GEMINI_MODEL = "gemini-3.8-flash"
-  val FALLBACK_GEMINI_MODELS =
+  const val PRIMARY_GROK_MODEL = "grok-4.20"
+  val FALLBACK_GROK_MODELS =
     listOf(
-      "gemini-3.8-flash",
-      "gemini-3-flash-preview",
-      "gemini-3.0-flash",
-      "gemini-2.5-flash",
+      "grok-4.20",
+      "grok-4.3",
+      "grok-4.6",
+      "grok-4.7",
+      "grok-3-mini",
+      "grok-3-fast",
+      "grok-3",
+    )
+  val FALLBACK_GROQ_MODELS =
+    listOf(
+      "llama-3.3-70b-versatile",
+      "llama-3.1-8b-instant",
     )
   const val CREATOR_RESPONSE =
     "Amake baniyeche Rohan. Se Class 11-er student, ar Saddam sir-er student."
